@@ -339,7 +339,7 @@ function rejectReservationRequest($conn, $requestId) {
     }
 }
 
-// Book Reservation Functions (existing functions updated)
+
 
 // Create a book reservation (called after approval)
 function createBookReservation($conn, $bookId, $userId, $notes = '') {

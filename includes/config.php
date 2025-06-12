@@ -13,6 +13,9 @@ if ($conn->connect_error) {
     die("Connection failed: " . $conn->connect_error);
 }
 
+date_default_timezone_set('Asia/Karachi'); 
+$conn->query("SET time_zone = '+05:00'");
+
 // Check if database exists, if not create it
 $sql = "CREATE DATABASE IF NOT EXISTS $dbname";
 if ($conn->query($sql) !== TRUE) {

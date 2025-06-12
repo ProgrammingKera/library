@@ -273,7 +273,7 @@ cleanExpiredReservations($conn);
                 <p class="text-muted">by <?php echo htmlspecialchars($book['author']); ?></p>
                 <div class="availability-status">
                     <span class="badge badge-success">
-                        <i class="fas fa-check-circle"></i> Available Now
+                        <i class="fas fa-check-circle"></i>&nbsp;Available Now
                     </span>
                 </div>
             </div>

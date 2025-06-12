@@ -351,6 +351,12 @@ $cancelledReservations = array_filter($reservations, function($res) { return $re
 .table-success:hover {
     background-color: rgba(40, 167, 69, 0.15);
 }
+
+.alert-info {
+    background-color: #e3f2fd;
+    border-color: #2196f3;
+    color: #1976d2;
+}
 </style>
 
 <?php include_once '../includes/footer.php'; ?>

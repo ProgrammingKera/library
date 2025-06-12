@@ -202,11 +202,11 @@ $cancelledReservationRequests = array_filter($reservationRequests, function($req
                                 <td>
                                     <?php if ($request['request_type'] == 'book'): ?>
                                         <span class="badge badge-primary">
-                                            <i class="fas fa-book"></i> Book Request
+                                            <i class="fas fa-book"></i>&nbsp;Book Request
                                         </span>
                                     <?php else: ?>
                                         <span class="badge badge-warning">
-                                            <i class="fas fa-bookmark"></i> Reservation Request
+                                            <i class="fas fa-bookmark"></i>&nbsp;Reservation Request
                                         </span>
                                     <?php endif; ?>
                                 </td>
@@ -360,11 +360,11 @@ $cancelledReservationRequests = array_filter($reservationRequests, function($req
                                 <td>
                                     <?php if ($request['request_type'] == 'book'): ?>
                                         <span class="badge badge-primary">
-                                            <i class="fas fa-book"></i> Book Request
+                                            <i class="fas fa-book"></i>&nbsp;Book Request
                                         </span>
                                     <?php else: ?>
                                         <span class="badge badge-warning">
-                                            <i class="fas fa-bookmark"></i> Reservation Request
+                                            <i class="fas fa-bookmark"></i>&nbsp;Reservation Request
                                         </span>
                                     <?php endif; ?>
                                 </td>
