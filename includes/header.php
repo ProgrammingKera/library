@@ -63,6 +63,10 @@ $currentPage = basename($_SERVER['PHP_SELF']);
                         <i class="fas fa-book"></i>
                         <span class="sidebar-menu-label">Books</span>
                     </a>
+                    <a href="reservations.php" class="sidebar-menu-item <?php echo $currentPage == 'reservations.php' ? 'active' : ''; ?>">
+                        <i class="fas fa-calendar-check"></i>
+                        <span class="sidebar-menu-label">Reservation</span>
+                    </a>
                     <a href="ebooks.php" class="sidebar-menu-item <?php echo $currentPage == 'ebooks.php' ? 'active' : ''; ?>">
                         <i class="fas fa-file-pdf"></i>
                         <span class="sidebar-menu-label">E-Books</span>

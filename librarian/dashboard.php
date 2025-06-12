@@ -5,6 +5,23 @@ include_once '../includes/header.php';
 // Check if user is a librarian
 checkUserRole('librarian');
 
+// Auto-process any pending reservations when books become available
+// This runs every time the dashboard loads to ensure reservations are processed
+$autoProcessSql = "
+    SELECT DISTINCT b.id as book_id
+    FROM books b
+    INNER JOIN book_reservations br ON b.id = br.book_id
+    WHERE b.available_quantity > 0 
+    AND br.status = 'active'
+";
+$autoProcessResult = $conn->query($autoProcessSql);
+
+if ($autoProcessResult && $autoProcessResult->num_rows > 0) {
+    while ($row = $autoProcessResult->fetch_assoc()) {
+        autoProcessReservationsOnAvailability($conn, $row['book_id']);
+    }
+}
+
 // Get dashboard statistics
 $totalBooks = getTotalBooks($conn);
 $issuedBooks = getIssuedBooks($conn);
@@ -91,6 +108,24 @@ $result = $conn->query($sql);
 if ($result) {
     while ($row = $result->fetch_assoc()) {
         $overdueBooks[] = $row;
+    }
+}
+
+// Get active reservations summary
+$activeReservations = [];
+$sql = "
+    SELECT br.id, b.title, u.name as user_name, br.priority_number, br.reservation_date
+    FROM book_reservations br
+    JOIN books b ON br.book_id = b.id
+    JOIN users u ON br.user_id = u.id
+    WHERE br.status = 'active'
+    ORDER BY br.reservation_date DESC
+    LIMIT 5
+";
+$result = $conn->query($sql);
+if ($result) {
+    while ($row = $result->fetch_assoc()) {
+        $activeReservations[] = $row;
     }
 }
 ?>
@@ -204,63 +239,46 @@ if ($result) {
         </div>
     </div>
     
-    <!-- Pending Requests -->
+    <!-- Active Reservations -->
     <div class="dashboard-col">
         <div class="card">
             <div class="card-header d-flex justify-between align-center">
-                <h3>Pending Book Requests</h3>
-                <span class="badge badge-warning"><?php echo $pendingRequests; ?></span>
+                <h3>Active Book Reservations</h3>
+                <span class="badge badge-info"><?php echo count($activeReservations); ?></span>
             </div>
             <div class="card-body">
-                <?php
-                $sql = "
-                    SELECT br.id, b.title, u.name as user_name, br.request_date
-                    FROM book_requests br
-                    JOIN books b ON br.book_id = b.id
-                    JOIN users u ON br.user_id = u.id
-                    WHERE br.status = 'pending'
-                    ORDER BY br.request_date ASC
-                    LIMIT 5
-                ";
-                $result = $conn->query($sql);
-                ?>
-                
-                <?php if ($result && $result->num_rows > 0): ?>
+                <?php if (count($activeReservations) > 0): ?>
+                    <div class="alert alert-info mb-3">
+                        <i class="fas fa-magic"></i>
+                        <strong>Auto-Issue:</strong> Books are automatically issued to reserved users when returned.
+                    </div>
+                    
                     <div class="table-container">
                         <table class="table">
                             <thead>
                                 <tr>
                                     <th>Book</th>
                                     <th>User</th>
+                                    <th>Queue #</th>
                                     <th>Date</th>
-                                    <th>Action</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                <?php while ($row = $result->fetch_assoc()): ?>
+                                <?php foreach ($activeReservations as $reservation): ?>
                                     <tr>
-                                        <td><?php echo htmlspecialchars($row['title']); ?></td>
-                                        <td><?php echo htmlspecialchars($row['user_name']); ?></td>
-                                        <td><?php echo date('M d, Y', strtotime($row['request_date'])); ?></td>
-                                        <td>
-                                            <a href="requests.php?id=<?php echo $row['id']; ?>&action=approve" class="btn btn-sm btn-success">Approve</a>
-                                            <a href="requests.php?id=<?php echo $row['id']; ?>&action=reject" class="btn btn-sm btn-danger">Reject</a>
-                                        </td>
+                                        <td><?php echo htmlspecialchars($reservation['title']); ?></td>
+                                        <td><?php echo htmlspecialchars($reservation['user_name']); ?></td>
+                                        <td><span class="badge badge-primary">#<?php echo $reservation['priority_number']; ?></span></td>
+                                        <td><?php echo date('M d, Y', strtotime($reservation['reservation_date'])); ?></td>
                                     </tr>
-                                <?php endwhile; ?>
+                                <?php endforeach; ?>
                             </tbody>
                         </table>
                     </div>
-                    
-                    <?php if ($pendingRequests > 5): ?>
-                        <div class="text-center mt-3">
-                            <a href="requests.php" class="btn btn-primary">View All Requests</a>
-                        </div>
-                    <?php endif; ?>
                 <?php else: ?>
                     <div class="empty-state">
                         <i class="fas fa-bookmark fa-3x"></i>
-                        <p>No pending book requests</p>
+                        <p>No active reservations</p>
                     </div>
                 <?php endif; ?>
             </div>
@@ -433,6 +451,16 @@ if ($result) {
     display: flex;
     justify-content: space-between;
     align-items: center;
+}
+
+.alert-info {
+    background-color: #e3f2fd;
+    border-color: #2196f3;
+    color: #1976d2;
+}
+
+.fa-magic {
+    color: #ff9800;
 }
 </style>
 

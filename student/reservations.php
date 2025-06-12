@@ -43,6 +43,13 @@ $cancelledReservations = array_filter($reservations, function($res) { return $re
         </div>
     <?php endif; ?>
 
+    <!-- Auto-Issue Information -->
+    <div class="alert alert-info mb-4">
+        <i class="fas fa-magic"></i>
+        <strong>Auto-Issue Feature:</strong> When a reserved book becomes available, it will be automatically issued to you! 
+        You'll receive a notification and can collect the book from the library.
+    </div>
+
     <!-- Quick Stats -->
     <div class="stats-container mb-4">
         <div class="stat-card">
@@ -61,7 +68,7 @@ $cancelledReservations = array_filter($reservations, function($res) { return $re
             </div>
             <div class="stat-info">
                 <div class="stat-number"><?php echo count($fulfilledReservations); ?></div>
-                <div class="stat-label">Ready for Collection</div>
+                <div class="stat-label">Auto-Issued Books</div>
             </div>
         </div>
 
@@ -120,6 +127,9 @@ $cancelledReservations = array_filter($reservations, function($res) { return $re
                                     <span class="badge badge-info">
                                         #<?php echo $reservation['priority_number']; ?> in queue
                                     </span>
+                                    <?php if ($reservation['priority_number'] == 1): ?>
+                                        <br><small class="text-success"><i class="fas fa-magic"></i> Next for auto-issue!</small>
+                                    <?php endif; ?>
                                 </td>
                                 <td>
                                     <?php 
@@ -166,16 +176,17 @@ $cancelledReservations = array_filter($reservations, function($res) { return $re
     </div>
     <?php endif; ?>
 
-    <!-- Ready for Collection -->
+    <!-- Auto-Issued Books (Previously Fulfilled) -->
     <?php if (count($fulfilledReservations) > 0): ?>
     <div class="card mb-4">
         <div class="card-header">
-            <h3><i class="fas fa-check-circle text-success"></i> Ready for Collection</h3>
+            <h3><i class="fas fa-magic text-success"></i> Auto-Issued Books</h3>
         </div>
         <div class="card-body">
             <div class="alert alert-success">
-                <i class="fas fa-info-circle"></i>
-                <strong>Great news!</strong> The following books are ready for collection. Please visit the library within 24 hours to collect them.
+                <i class="fas fa-check-circle"></i>
+                <strong>Success!</strong> These books were automatically issued to you when they became available. 
+                Please collect them from the library.
             </div>
             
             <div class="table-container">
@@ -184,8 +195,8 @@ $cancelledReservations = array_filter($reservations, function($res) { return $re
                         <tr>
                             <th>Book Details</th>
                             <th>Reserved On</th>
-                            <th>Notified On</th>
-                            <th>Collection Deadline</th>
+                            <th>Auto-Issued On</th>
+                            <th>Status</th>
                             <th>Notes</th>
                         </tr>
                     </thead>
@@ -199,26 +210,9 @@ $cancelledReservations = array_filter($reservations, function($res) { return $re
                                 <td><?php echo date('M d, Y H:i', strtotime($reservation['reservation_date'])); ?></td>
                                 <td><?php echo date('M d, Y H:i', strtotime($reservation['notified_at'])); ?></td>
                                 <td>
-                                    <?php 
-                                    $deadline = new DateTime($reservation['notified_at']);
-                                    $deadline->add(new DateInterval('P1D')); // Add 24 hours
-                                    $now = new DateTime();
-                                    
-                                    echo date('M d, Y H:i', $deadline->getTimestamp());
-                                    
-                                    if ($deadline > $now) {
-                                        $timeLeft = $now->diff($deadline);
-                                        echo '<br><small class="text-success">';
-                                        if ($timeLeft->h > 0) {
-                                            echo $timeLeft->h . ' hours left';
-                                        } else {
-                                            echo $timeLeft->i . ' minutes left';
-                                        }
-                                        echo '</small>';
-                                    } else {
-                                        echo '<br><small class="text-danger">Deadline passed</small>';
-                                    }
-                                    ?>
+                                    <span class="badge badge-success">
+                                        <i class="fas fa-magic"></i> Auto-Issued
+                                    </span>
                                 </td>
                                 <td>
                                     <?php if (!empty($reservation['notes'])): ?>
@@ -289,7 +283,7 @@ $cancelledReservations = array_filter($reservations, function($res) { return $re
             <div class="card-body text-center">
                 <i class="fas fa-bookmark fa-3x text-muted mb-3"></i>
                 <h3>No Reservations</h3>
-                <p class="text-muted">You haven't made any book reservations yet. Reserve books when they're unavailable to get notified when they become available.</p>
+                <p class="text-muted">You haven't made any book reservations yet. Reserve books when they're unavailable to get them automatically issued when available!</p>
                 <a href="books.php" class="btn btn-primary">
                     <i class="fas fa-search"></i> Browse Books
                 </a>

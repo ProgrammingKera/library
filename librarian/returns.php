@@ -65,17 +65,22 @@ if (isset($_POST['process_return'])) {
             $notificationMsg = "Your book '{$issuedBook['title']}' has been returned successfully.";
             sendNotification($conn, $issuedBook['user_id'], $notificationMsg);
             
-            // Process book reservations
-            $reservationResult = processBookReservations($conn, $issuedBook['book_id']);
-            
+            // Commit the transaction first
             $conn->commit();
+            
+            // Now process book reservations with auto-issue functionality
+            $reservationResult = processBookReservations($conn, $issuedBook['book_id']);
             
             $message = "Book returned successfully.";
             if ($fineAmount > 0) {
                 $message .= " A fine of PKR " . number_format($fineAmount, 2) . " has been issued.";
             }
             if ($reservationResult['success']) {
-                $message .= " " . $reservationResult['message'];
+                if (isset($reservationResult['auto_issued']) && $reservationResult['auto_issued']) {
+                    $message .= " " . $reservationResult['message'];
+                } else {
+                    $message .= " " . $reservationResult['message'];
+                }
             }
             $messageType = "success";
         } else {
@@ -317,9 +322,11 @@ while ($row = $result->fetch_assoc()) {
                                                 <div class="alert alert-info">
                                                     <i class="fas fa-info-circle"></i>
                                                     <strong>Reservation Alert:</strong> This book has <?php echo count($reservationQueue); ?> active reservation(s). 
-                                                    The next person in queue will be automatically notified when you process this return.
+                                                    The book will be automatically issued to the next person in queue.
                                                     <br><br>
                                                     <strong>Next in queue:</strong> <?php echo htmlspecialchars($reservationQueue[0]['user_name']); ?>
+                                                    <br>
+                                                    <span class="text-success"><i class="fas fa-magic"></i> <strong>Auto-Issue:</strong> The book will be automatically issued to this user upon return.</span>
                                                 </div>
                                             <?php endif; ?>
                                             
@@ -350,7 +357,13 @@ while ($row = $result->fetch_assoc()) {
                                                 
                                                 <div class="form-group text-right">
                                                     <button type="button" class="btn btn-secondary modal-close">Cancel</button>
-                                                    <button type="submit" name="process_return" class="btn btn-primary">Confirm Return</button>
+                                                    <button type="submit" name="process_return" class="btn btn-primary">
+                                                        <?php if (count($reservationQueue) > 0): ?>
+                                                            <i class="fas fa-magic"></i> Return & Auto-Issue
+                                                        <?php else: ?>
+                                                            <i class="fas fa-undo"></i> Confirm Return
+                                                        <?php endif; ?>
+                                                    </button>
                                                 </div>
                                             </form>
                                         </div>
@@ -370,6 +383,22 @@ while ($row = $result->fetch_assoc()) {
         </tbody>
     </table>
 </div>
+
+<style>
+.alert-info {
+    background-color: #e3f2fd;
+    border-color: #2196f3;
+    color: #1976d2;
+}
+
+.text-success {
+    color: #28a745 !important;
+}
+
+.fa-magic {
+    color: #ff9800;
+}
+</style>
 
 <?php
 // Include footer

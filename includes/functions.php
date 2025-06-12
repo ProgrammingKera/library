@@ -292,7 +292,7 @@ function reorderReservationPriorities($conn, $cancelledReservationId) {
     }
 }
 
-// Process reservations when a book is returned
+// Process reservations when a book is returned - ENHANCED VERSION
 function processBookReservations($conn, $bookId) {
     // Get the next reservation in queue
     $stmt = $conn->prepare("
@@ -311,27 +311,72 @@ function processBookReservations($conn, $bookId) {
     if ($result->num_rows > 0) {
         $reservation = $result->fetch_assoc();
         
-        // Mark reservation as fulfilled
-        $stmt = $conn->prepare("
-            UPDATE book_reservations 
-            SET status = 'fulfilled', notified_at = NOW() 
-            WHERE id = ?
-        ");
-        $stmt->bind_param("i", $reservation['id']);
-        $stmt->execute();
+        // Start transaction for automatic book issue
+        $conn->begin_transaction();
         
-        // Send notification to user
-        $message = "Good news! The book '{$reservation['book_title']}' you reserved is now available. Please visit the library within 24 hours to collect it, or your reservation will be cancelled.";
-        sendNotification($conn, $reservation['user_id'], $message);
-        
-        // Reorder remaining reservations
-        reorderReservationPriorities($conn, $reservation['id']);
-        
-        return array(
-            'success' => true,
-            'user_notified' => $reservation['user_name'],
-            'message' => "Book reserved for {$reservation['user_name']}. They have been notified."
-        );
+        try {
+            // Mark reservation as fulfilled
+            $stmt = $conn->prepare("
+                UPDATE book_reservations 
+                SET status = 'fulfilled', notified_at = NOW() 
+                WHERE id = ?
+            ");
+            $stmt->bind_param("i", $reservation['id']);
+            $stmt->execute();
+            
+            // Automatically issue the book to the reserved user
+            $returnDate = generateDueDate(14); // 14 days from now
+            
+            $stmt = $conn->prepare("
+                INSERT INTO issued_books (book_id, user_id, return_date)
+                VALUES (?, ?, ?)
+            ");
+            $stmt->bind_param("iis", $bookId, $reservation['user_id'], $returnDate);
+            $stmt->execute();
+            
+            // Update book availability (decrease by 1 since it's now issued)
+            updateBookAvailability($conn, $bookId, 'issue');
+            
+            // Send notification to user about automatic issue
+            $message = "Great news! The book '{$reservation['book_title']}' you reserved has been automatically issued to you. Due date: " . date('F j, Y', strtotime($returnDate)) . ". Please collect it from the library.";
+            sendNotification($conn, $reservation['user_id'], $message);
+            
+            // Reorder remaining reservations
+            reorderReservationPriorities($conn, $reservation['id']);
+            
+            $conn->commit();
+            
+            return array(
+                'success' => true,
+                'user_notified' => $reservation['user_name'],
+                'message' => "Book automatically issued to {$reservation['user_name']} (reserved user). They have been notified.",
+                'auto_issued' => true
+            );
+            
+        } catch (Exception $e) {
+            $conn->rollback();
+            
+            // Fallback to just notification if auto-issue fails
+            $stmt = $conn->prepare("
+                UPDATE book_reservations 
+                SET status = 'fulfilled', notified_at = NOW() 
+                WHERE id = ?
+            ");
+            $stmt->bind_param("i", $reservation['id']);
+            $stmt->execute();
+            
+            $message = "Good news! The book '{$reservation['book_title']}' you reserved is now available. Please visit the library within 24 hours to collect it, or your reservation will be cancelled.";
+            sendNotification($conn, $reservation['user_id'], $message);
+            
+            reorderReservationPriorities($conn, $reservation['id']);
+            
+            return array(
+                'success' => true,
+                'user_notified' => $reservation['user_name'],
+                'message' => "Book reserved for {$reservation['user_name']}. They have been notified. (Auto-issue failed: " . $e->getMessage() . ")",
+                'auto_issued' => false
+            );
+        }
     }
     
     return array('success' => false, 'message' => 'No active reservations found.');
@@ -415,5 +460,53 @@ function cleanExpiredReservations($conn) {
     }
     
     return count($expiredReservations);
+}
+
+// NEW FUNCTION: Auto-process reservations when books become available
+function autoProcessReservationsOnAvailability($conn, $bookId) {
+    // Check if there are any active reservations for this book
+    $stmt = $conn->prepare("
+        SELECT COUNT(*) as reservation_count 
+        FROM book_reservations 
+        WHERE book_id = ? AND status = 'active'
+    ");
+    $stmt->bind_param("i", $bookId);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $row = $result->fetch_assoc();
+    
+    if ($row['reservation_count'] > 0) {
+        // Check how many copies are available
+        $stmt = $conn->prepare("SELECT available_quantity FROM books WHERE id = ?");
+        $stmt->bind_param("i", $bookId);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $book = $result->fetch_assoc();
+        
+        $availableCopies = $book['available_quantity'];
+        $processedReservations = 0;
+        
+        // Process reservations up to the number of available copies
+        while ($availableCopies > 0 && $processedReservations < $row['reservation_count']) {
+            $reservationResult = processBookReservations($conn, $bookId);
+            
+            if ($reservationResult['success']) {
+                $processedReservations++;
+                if ($reservationResult['auto_issued']) {
+                    $availableCopies--; // Decrease available copies if book was auto-issued
+                }
+            } else {
+                break; // No more reservations to process
+            }
+        }
+        
+        return array(
+            'success' => true,
+            'processed_count' => $processedReservations,
+            'message' => "Processed $processedReservations reservation(s) automatically."
+        );
+    }
+    
+    return array('success' => false, 'message' => 'No reservations to process.');
 }
 ?>
