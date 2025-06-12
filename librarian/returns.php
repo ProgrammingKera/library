@@ -65,11 +65,17 @@ if (isset($_POST['process_return'])) {
             $notificationMsg = "Your book '{$issuedBook['title']}' has been returned successfully.";
             sendNotification($conn, $issuedBook['user_id'], $notificationMsg);
             
+            // Process book reservations
+            $reservationResult = processBookReservations($conn, $issuedBook['book_id']);
+            
             $conn->commit();
             
             $message = "Book returned successfully.";
             if ($fineAmount > 0) {
-                $message .= " A fine of $" . number_format($fineAmount, 2) . " has been issued.";
+                $message .= " A fine of PKR" . number_format($fineAmount, 2) . " has been issued.";
+            }
+            if ($reservationResult['success']) {
+                $message .= " " . $reservationResult['message'];
             }
             $messageType = "success";
         } else {
@@ -95,8 +101,6 @@ $stmt->execute();
 // Handle search and filtering
 $search = isset($_GET['search']) ? trim($_GET['search']) : '';
 $status = isset($_GET['status']) ? trim($_GET['status']) : '';
-
-
 
 // Build the query
 $sql = "
@@ -304,7 +308,20 @@ while ($row = $result->fetch_assoc()) {
                                                 $daysOverdue = $diff->days;
                                                 $suggestedFine = $daysOverdue * 100.00; // $1 per day overdue
                                             }
+                                            
+                                            // Check for reservations
+                                            $reservationQueue = getBookReservationQueue($conn, $book['book_id']);
                                             ?>
+                                            
+                                            <?php if (count($reservationQueue) > 0): ?>
+                                                <div class="alert alert-info">
+                                                    <i class="fas fa-info-circle"></i>
+                                                    <strong>Reservation Alert:</strong> This book has <?php echo count($reservationQueue); ?> active reservation(s). 
+                                                    The next person in queue will be automatically notified when you process this return.
+                                                    <br><br>
+                                                    <strong>Next in queue:</strong> <?php echo htmlspecialchars($reservationQueue[0]['user_name']); ?>
+                                                </div>
+                                            <?php endif; ?>
                                             
                                             <form action="" method="POST">
                                                 <input type="hidden" name="issued_book_id" value="<?php echo $book['id']; ?>">

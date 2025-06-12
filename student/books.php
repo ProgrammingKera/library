@@ -32,9 +32,20 @@ if (isset($_POST['request_book'])) {
             $messageType = "danger";
         }
     } else {
-        $message = "Book is not available for request.";
-        $messageType = "danger";
+        $message = "Book is not available for immediate issue.";
+        $messageType = "warning";
     }
+}
+
+// Process book reservation
+if (isset($_POST['reserve_book'])) {
+    $bookId = (int)$_POST['book_id'];
+    $notes = trim($_POST['notes']);
+    $userId = $_SESSION['user_id'];
+    
+    $result = createBookReservation($conn, $bookId, $userId, $notes);
+    $message = $result['message'];
+    $messageType = $result['success'] ? 'success' : 'danger';
 }
 
 // Handle search and filtering
@@ -83,6 +94,9 @@ $books = [];
 while ($row = $result->fetch_assoc()) {
     $books[] = $row;
 }
+
+// Clean expired reservations
+cleanExpiredReservations($conn);
 ?>
 
 <div class="container">
@@ -130,6 +144,20 @@ while ($row = $result->fetch_assoc()) {
     <div class="books-grid">
         <?php if (count($books) > 0): ?>
             <?php foreach ($books as $book): ?>
+                <?php
+                // Get reservation queue for this book
+                $reservationQueue = getBookReservationQueue($conn, $book['id']);
+                $userHasReservation = false;
+                $userReservationPosition = 0;
+                
+                foreach ($reservationQueue as $index => $reservation) {
+                    if ($reservation['user_id'] == $_SESSION['user_id']) {
+                        $userHasReservation = true;
+                        $userReservationPosition = $index + 1;
+                        break;
+                    }
+                }
+                ?>
                 <div class="book-card">
                     <div class="book-cover">
                         <?php if (!empty($book['cover_image'])): ?>
@@ -147,15 +175,37 @@ while ($row = $result->fetch_assoc()) {
                                 <?php echo $book['available_quantity']; ?> / <?php echo $book['total_quantity']; ?> available
                             </span>
                         </div>
+                        
+                        <?php if (count($reservationQueue) > 0): ?>
+                            <div class="reservation-info">
+                                <small class="text-info">
+                                    <i class="fas fa-users"></i> 
+                                    <?php echo count($reservationQueue); ?> person(s) in reservation queue
+                                </small>
+                            </div>
+                        <?php endif; ?>
+                        
+                        <?php if ($userHasReservation): ?>
+                            <div class="user-reservation-status">
+                                <span class="badge badge-info">
+                                    <i class="fas fa-bookmark"></i> 
+                                    You're #<?php echo $userReservationPosition; ?> in queue
+                                </span>
+                            </div>
+                        <?php endif; ?>
                     </div>
                     <div class="book-actions">
                         <?php if ($book['available_quantity'] > 0): ?>
                             <button class="btn btn-primary btn-sm" data-modal-target="requestModal<?php echo $book['id']; ?>">
                                 <i class="fas fa-book"></i> Request Book
                             </button>
+                        <?php elseif (!$userHasReservation): ?>
+                            <button class="btn btn-warning btn-sm" data-modal-target="reserveModal<?php echo $book['id']; ?>">
+                                <i class="fas fa-bookmark"></i> Reserve Book
+                            </button>
                         <?php else: ?>
                             <button class="btn btn-secondary btn-sm" disabled>
-                                <i class="fas fa-clock"></i> Not Available
+                                <i class="fas fa-bookmark"></i> Reserved
                             </button>
                         <?php endif; ?>
                     </div>
@@ -168,17 +218,85 @@ while ($row = $result->fetch_assoc()) {
                                 <button class="modal-close">&times;</button>
                             </div>
                             <div class="modal-body">
+                                <div class="book-request-info">
+                                    <h4><?php echo htmlspecialchars($book['title']); ?></h4>
+                                    <p class="text-muted">by <?php echo htmlspecialchars($book['author']); ?></p>
+                                    <div class="availability-status">
+                                        <span class="badge badge-success">
+                                            <i class="fas fa-check-circle"></i> Available Now
+                                        </span>
+                                    </div>
+                                </div>
+                                
                                 <form action="" method="POST">
                                     <input type="hidden" name="book_id" value="<?php echo $book['id']; ?>">
                                     
                                     <div class="form-group">
                                         <label for="notes">Additional Notes (Optional)</label>
-                                        <textarea id="notes" name="notes" class="form-control" rows="3"></textarea>
+                                        <textarea id="notes" name="notes" class="form-control" rows="3" placeholder="Any special requirements or notes..."></textarea>
                                     </div>
                                     
                                     <div class="form-group text-right">
                                         <button type="button" class="btn btn-secondary modal-close">Cancel</button>
-                                        <button type="submit" name="request_book" class="btn btn-primary">Submit Request</button>
+                                        <button type="submit" name="request_book" class="btn btn-primary">
+                                            <i class="fas fa-paper-plane"></i> Submit Request
+                                        </button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Reserve Modal -->
+                    <div class="modal-overlay" id="reserveModal<?php echo $book['id']; ?>">
+                        <div class="modal">
+                            <div class="modal-header">
+                                <h3 class="modal-title">Reserve Book</h3>
+                                <button class="modal-close">&times;</button>
+                            </div>
+                            <div class="modal-body">
+                                <div class="book-reserve-info">
+                                    <h4><?php echo htmlspecialchars($book['title']); ?></h4>
+                                    <p class="text-muted">by <?php echo htmlspecialchars($book['author']); ?></p>
+                                    <div class="availability-status">
+                                        <span class="badge badge-warning">
+                                            <i class="fas fa-clock"></i> Currently Unavailable
+                                        </span>
+                                    </div>
+                                    
+                                    <?php if (count($reservationQueue) > 0): ?>
+                                        <div class="queue-info">
+                                            <p class="text-info">
+                                                <i class="fas fa-users"></i> 
+                                                <?php echo count($reservationQueue); ?> person(s) ahead of you in the queue
+                                            </p>
+                                        </div>
+                                    <?php endif; ?>
+                                    
+                                    <div class="reservation-details">
+                                        <h5>Reservation Details:</h5>
+                                        <ul>
+                                            <li>You will be notified when the book becomes available</li>
+                                            <li>You'll have 24 hours to collect the book once notified</li>
+                                            <li>Reservations expire after 7 days if not fulfilled</li>
+                                            <li>You can cancel your reservation anytime</li>
+                                        </ul>
+                                    </div>
+                                </div>
+                                
+                                <form action="" method="POST">
+                                    <input type="hidden" name="book_id" value="<?php echo $book['id']; ?>">
+                                    
+                                    <div class="form-group">
+                                        <label for="reserve_notes">Notes (Optional)</label>
+                                        <textarea id="reserve_notes" name="notes" class="form-control" rows="3" placeholder="Any special requirements or notes..."></textarea>
+                                    </div>
+                                    
+                                    <div class="form-group text-right">
+                                        <button type="button" class="btn btn-secondary modal-close">Cancel</button>
+                                        <button type="submit" name="reserve_book" class="btn btn-warning">
+                                            <i class="fas fa-bookmark"></i> Reserve Book
+                                        </button>
                                     </div>
                                 </form>
                             </div>
@@ -283,6 +401,63 @@ while ($row = $result->fetch_assoc()) {
 .no-results h3 {
     color: var(--text-color);
     margin-bottom: 15px;
+}
+
+.reservation-info {
+    margin-top: 10px;
+    padding: 8px;
+    background: rgba(23, 162, 184, 0.1);
+    border-radius: 4px;
+}
+
+.user-reservation-status {
+    margin-top: 10px;
+}
+
+.book-request-info, .book-reserve-info {
+    margin-bottom: 20px;
+    padding: 15px;
+    background: var(--gray-100);
+    border-radius: var(--border-radius);
+}
+
+.book-request-info h4, .book-reserve-info h4 {
+    margin: 0 0 5px 0;
+    color: var(--primary-color);
+}
+
+.availability-status {
+    margin: 10px 0;
+}
+
+.queue-info {
+    margin: 15px 0;
+    padding: 10px;
+    background: rgba(255, 193, 7, 0.1);
+    border-radius: 4px;
+}
+
+.reservation-details {
+    margin-top: 15px;
+    padding: 15px;
+    background: var(--white);
+    border-radius: var(--border-radius);
+    border-left: 4px solid var(--warning-color);
+}
+
+.reservation-details h5 {
+    margin: 0 0 10px 0;
+    color: var(--primary-color);
+}
+
+.reservation-details ul {
+    margin: 0;
+    padding-left: 20px;
+}
+
+.reservation-details li {
+    margin-bottom: 5px;
+    color: var(--text-color);
 }
 
 @media (max-width: 768px) {

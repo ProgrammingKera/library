@@ -114,6 +114,40 @@ if ($conn->query($sql) !== TRUE) {
     die("Error creating book_requests table: " . $conn->error);
 }
 
+// Create Book Reservations table
+$sql = "CREATE TABLE IF NOT EXISTS book_reservations (
+    id INT(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    book_id INT(11) NOT NULL,
+    user_id INT(11) NOT NULL,
+    reservation_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    status ENUM('active', 'fulfilled', 'cancelled', 'expired') NOT NULL DEFAULT 'active',
+    priority_number INT(11) NOT NULL,
+    expires_at DATETIME NOT NULL,
+    notified_at DATETIME NULL,
+    notes TEXT,
+    FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX idx_book_priority (book_id, priority_number),
+    INDEX idx_status_expires (status, expires_at)
+)";
+if ($conn->query($sql) !== TRUE) {
+    die("Error creating book_reservations table: " . $conn->error);
+}
+
+// Create Login Attempts table for security
+$sql = "CREATE TABLE IF NOT EXISTS login_attempts (
+    id INT(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    identifier VARCHAR(100) NOT NULL,
+    ip_address VARCHAR(45) NOT NULL,
+    attempt_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    success BOOLEAN DEFAULT FALSE,
+    INDEX idx_identifier_time (identifier, attempt_time),
+    INDEX idx_ip_time (ip_address, attempt_time)
+)";
+if ($conn->query($sql) !== TRUE) {
+    die("Error creating login_attempts table: " . $conn->error);
+}
+
 // Create Fines table
 $sql = "CREATE TABLE IF NOT EXISTS fines (
     id INT(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
@@ -139,6 +173,8 @@ $sql = "CREATE TABLE IF NOT EXISTS payments (
     payment_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     payment_method VARCHAR(50),
     receipt_number VARCHAR(50),
+    transaction_id VARCHAR(100),
+    payment_details TEXT,
     FOREIGN KEY (fine_id) REFERENCES fines(id) ON DELETE CASCADE,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 )";
@@ -186,6 +222,61 @@ function generateUniqueId($conn, $role) {
     } while ($result->num_rows > 0);
     
     return $uniqueId;
+}
+
+// Function to check login attempts and implement security
+function checkLoginAttempts($conn, $identifier, $ipAddress) {
+    // Clean old attempts (older than 30 minutes)
+    $cleanupSql = "DELETE FROM login_attempts WHERE attempt_time < DATE_SUB(NOW(), INTERVAL 30 MINUTE)";
+    $conn->query($cleanupSql);
+    
+    // Check failed attempts in last 30 seconds
+    $stmt = $conn->prepare("
+        SELECT COUNT(*) as failed_attempts, 
+               MAX(attempt_time) as last_attempt
+        FROM login_attempts 
+        WHERE (identifier = ? OR ip_address = ?) 
+        AND success = FALSE 
+        AND attempt_time > DATE_SUB(NOW(), INTERVAL 30 SECOND)
+    ");
+    $stmt->bind_param("ss", $identifier, $ipAddress);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $row = $result->fetch_assoc();
+    
+    if ($row['failed_attempts'] >= 5) {
+        $lastAttempt = new DateTime($row['last_attempt']);
+        $now = new DateTime();
+        $timeDiff = $now->getTimestamp() - $lastAttempt->getTimestamp();
+        
+        if ($timeDiff < 30) {
+            return array(
+                'blocked' => true,
+                'remaining_time' => 30 - $timeDiff,
+                'message' => 'Too many failed login attempts. Please wait ' . (30 - $timeDiff) . ' seconds before trying again.'
+            );
+        }
+    }
+    
+    return array('blocked' => false);
+}
+
+// Function to record login attempt
+function recordLoginAttempt($conn, $identifier, $ipAddress, $success) {
+    $stmt = $conn->prepare("INSERT INTO login_attempts (identifier, ip_address, success) VALUES (?, ?, ?)");
+    $stmt->bind_param("ssi", $identifier, $ipAddress, $success);
+    $stmt->execute();
+}
+
+// Function to get user's IP address
+function getUserIpAddress() {
+    if (!empty($_SERVER['HTTP_CLIENT_IP'])) {
+        return $_SERVER['HTTP_CLIENT_IP'];
+    } elseif (!empty($_SERVER['HTTP_X_FORWARDED_FOR'])) {
+        return $_SERVER['HTTP_X_FORWARDED_FOR'];
+    } else {
+        return $_SERVER['REMOTE_ADDR'];
+    }
 }
 
 // Check if default librarian exists, if not create one

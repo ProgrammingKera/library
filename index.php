@@ -17,39 +17,54 @@ if (isset($_SESSION['user_id'])) {
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     $login_identifier = trim($_POST['login_identifier']); // Can be email or unique_id
     $password = $_POST['password'];
+    $ipAddress = getUserIpAddress();
     
     // Validate input
     if (empty($login_identifier) || empty($password)) {
         $error = "Please enter both login identifier and password";
     } else {
-        // Prepare SQL statement to check both email and unique_id
-        $stmt = $conn->prepare("SELECT * FROM users WHERE email = ? OR unique_id = ?");
-        $stmt->bind_param("ss", $login_identifier, $login_identifier);
-        $stmt->execute();
-        $result = $stmt->get_result();
+        // Check login attempts and security
+        $securityCheck = checkLoginAttempts($conn, $login_identifier, $ipAddress);
         
-        if ($result->num_rows == 1) {
-            $user = $result->fetch_assoc();
-            if (password_verify($password, $user['password'])) {
-                // Set session variables
-                $_SESSION['user_id'] = $user['id'];
-                $_SESSION['name'] = $user['name'];
-                $_SESSION['email'] = $user['email'];
-                $_SESSION['role'] = $user['role'];
-                $_SESSION['unique_id'] = $user['unique_id'];
-                
-                // Redirect based on role
-                if ($user['role'] == 'librarian') {
-                    header('Location: librarian/dashboard.php');
-                } else {
-                    header('Location: student/dashboard.php');
-                }
-                exit();
-            } else {
-                $error = "Invalid password";
-            }
+        if ($securityCheck['blocked']) {
+            $error = $securityCheck['message'];
         } else {
-            $error = "User not found";
+            // Prepare SQL statement to check both email and unique_id
+            $stmt = $conn->prepare("SELECT * FROM users WHERE email = ? OR unique_id = ?");
+            $stmt->bind_param("ss", $login_identifier, $login_identifier);
+            $stmt->execute();
+            $result = $stmt->get_result();
+            
+            if ($result->num_rows == 1) {
+                $user = $result->fetch_assoc();
+                if (password_verify($password, $user['password'])) {
+                    // Record successful login attempt
+                    recordLoginAttempt($conn, $login_identifier, $ipAddress, true);
+                    
+                    // Set session variables
+                    $_SESSION['user_id'] = $user['id'];
+                    $_SESSION['name'] = $user['name'];
+                    $_SESSION['email'] = $user['email'];
+                    $_SESSION['role'] = $user['role'];
+                    $_SESSION['unique_id'] = $user['unique_id'];
+                    
+                    // Redirect based on role
+                    if ($user['role'] == 'librarian') {
+                        header('Location: librarian/dashboard.php');
+                    } else {
+                        header('Location: student/dashboard.php');
+                    }
+                    exit();
+                } else {
+                    // Record failed login attempt
+                    recordLoginAttempt($conn, $login_identifier, $ipAddress, false);
+                    $error = "Invalid password";
+                }
+            } else {
+                // Record failed login attempt
+                recordLoginAttempt($conn, $login_identifier, $ipAddress, false);
+                $error = "User not found";
+            }
         }
     }
 }
@@ -297,6 +312,23 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             color: #0d47a1;
         }
 
+        .security-warning {
+            background: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeaa7;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .countdown-timer {
+            font-weight: bold;
+            color: #dc3545;
+        }
+
         @keyframes slideUp {
             from {
                 opacity: 0;
@@ -340,8 +372,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         </div>
         
         <div class="login-form">
-            
-
             <?php if (isset($error)): ?>
                 <div class="alert alert-danger">
                     <i class="fas fa-exclamation-circle"></i> <?php echo $error; ?>
@@ -357,7 +387,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                 <div class="form-group">
                     <label for="password">Password</label>
                     <input type="password" id="password" name="password" placeholder="Enter your password" required>
-                    <i class="fas fa-eye password-toggle" id="toggleIcon" onclick="togglePassword()" ></i>
+                    <i class="fas fa-eye password-toggle" id="toggleIcon" onclick="togglePassword()"></i>
                     
                     <div class="password-requirements" id="passwordRequirements">
                         <h4>Password Requirements:</h4>
@@ -376,7 +406,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                     </div>
                 </div>
                 
-                <button type="submit" class="btn btn-primary">
+                <button type="submit" class="btn btn-primary" id="loginButton">
                     <i class="fas fa-sign-in-alt"></i> Login
                 </button>
 
@@ -462,6 +492,36 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                     specialReq.querySelector('i').className = 'fas fa-times';
                 }
             });
+
+            // Check for security warning in error message and start countdown
+            const errorAlert = document.querySelector('.alert-danger');
+            if (errorAlert && errorAlert.textContent.includes('Please wait')) {
+                const match = errorAlert.textContent.match(/(\d+) seconds/);
+                if (match) {
+                    let remainingTime = parseInt(match[1]);
+                    const loginButton = document.getElementById('loginButton');
+                    
+                    // Disable login button
+                    loginButton.disabled = true;
+                    loginButton.style.background = '#ccc';
+                    loginButton.style.cursor = 'not-allowed';
+                    
+                    // Start countdown
+                    const countdownInterval = setInterval(() => {
+                        remainingTime--;
+                        
+                        if (remainingTime > 0) {
+                            errorAlert.innerHTML = `<i class="fas fa-exclamation-circle"></i> Too many failed login attempts. Please wait <span class="countdown-timer">${remainingTime}</span> seconds before trying again.`;
+                        } else {
+                            clearInterval(countdownInterval);
+                            errorAlert.style.display = 'none';
+                            loginButton.disabled = false;
+                            loginButton.style.background = '#0d47a1';
+                            loginButton.style.cursor = 'pointer';
+                        }
+                    }, 1000);
+                }
+            }
         });
     </script>
 </body>
