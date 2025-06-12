@@ -101,6 +101,12 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (modal) {
                     modal.classList.add('active');
                     document.body.style.overflow = 'hidden'; // Prevent scrolling
+                    
+                    // Focus on first input in modal
+                    const firstInput = modal.querySelector('input, textarea, select');
+                    if (firstInput) {
+                        setTimeout(() => firstInput.focus(), 100);
+                    }
                 }
             });
         });
@@ -109,7 +115,8 @@ document.addEventListener('DOMContentLoaded', function() {
     // Close modal with close button
     if (modalCloseButtons.length > 0) {
         modalCloseButtons.forEach(button => {
-            button.addEventListener('click', function() {
+            button.addEventListener('click', function(e) {
+                e.preventDefault();
                 const modal = this.closest('.modal-overlay');
                 if (modal) {
                     modal.classList.remove('active');

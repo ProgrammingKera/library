@@ -57,7 +57,7 @@ if (isset($_POST['process_return'])) {
                 $stmt->execute();
                 
                 // Send notification to user about fine
-                $notificationMsg = "You have been charged a fine of PKR" . number_format($fineAmount, 2) . " for late return of '{$issuedBook['title']}'. Please settle the payment at the library.";
+                $notificationMsg = "You have been charged a fine of PKR " . number_format($fineAmount, 2) . " for late return of '{$issuedBook['title']}'. Please settle the payment at the library.";
                 sendNotification($conn, $issuedBook['user_id'], $notificationMsg);
             }
             
@@ -72,7 +72,7 @@ if (isset($_POST['process_return'])) {
             
             $message = "Book returned successfully.";
             if ($fineAmount > 0) {
-                $message .= " A fine of PKR" . number_format($fineAmount, 2) . " has been issued.";
+                $message .= " A fine of PKR " . number_format($fineAmount, 2) . " has been issued.";
             }
             if ($reservationResult['success']) {
                 $message .= " " . $reservationResult['message'];
@@ -88,13 +88,15 @@ if (isset($_POST['process_return'])) {
     }
 }
 
+// Update overdue status and calculate fines for overdue books
 $today = date('Y-m-d');
-$updateFineSql = "
-    UPDATE issued_books
-    SET fine_amount = DATEDIFF(?, return_date) * 100.00
+$updateOverdueSql = "
+    UPDATE issued_books 
+    SET status = 'overdue',
+        fine_amount = GREATEST(DATEDIFF(?, return_date) * 100.00, 0)
     WHERE status = 'issued' AND ? > return_date
 ";
-$stmt = $conn->prepare($updateFineSql);
+$stmt = $conn->prepare($updateOverdueSql);
 $stmt->bind_param("ss", $today, $today);
 $stmt->execute();
 
@@ -104,7 +106,13 @@ $status = isset($_GET['status']) ? trim($_GET['status']) : '';
 
 // Build the query
 $sql = "
-    SELECT ib.*, b.title as book_title, u.name as user_name
+    SELECT ib.*, b.title as book_title, u.name as user_name,
+           CASE 
+               WHEN ib.actual_return_date IS NULL AND CURRENT_DATE > ib.return_date THEN 'overdue'
+               WHEN ib.actual_return_date IS NULL THEN 'issued'
+               ELSE ib.status
+           END as current_status,
+           GREATEST(DATEDIFF(CURRENT_DATE, ib.return_date), 0) as days_overdue
     FROM issued_books ib
     JOIN books b ON ib.book_id = b.id
     JOIN users u ON ib.user_id = u.id
@@ -122,12 +130,21 @@ if (!empty($search)) {
 }
 
 if (!empty($status)) {
-    $sql .= " AND ib.status = ?";
-    $params[] = $status;
-    $types .= "s";
+    if ($status == 'overdue') {
+        $sql .= " AND ib.actual_return_date IS NULL AND CURRENT_DATE > ib.return_date";
+    } elseif ($status == 'issued') {
+        $sql .= " AND ib.actual_return_date IS NULL AND CURRENT_DATE <= ib.return_date";
+    } else {
+        $sql .= " AND ib.status = ?";
+        $params[] = $status;
+        $types .= "s";
+    }
 }
 
-$sql .= " ORDER BY ib.issue_date DESC";
+$sql .= " ORDER BY 
+    CASE WHEN ib.actual_return_date IS NULL THEN 0 ELSE 1 END,
+    ib.return_date ASC,
+    ib.issue_date DESC";
 
 // Prepare and execute the query
 $stmt = $conn->prepare($sql);
@@ -155,18 +172,20 @@ while ($row = $result->fetch_assoc()) {
         <div class="badge-container">
             <?php
             // Get issued books counts by status
-            $countSql = "SELECT status, COUNT(*) as count FROM issued_books GROUP BY status";
+            $countSql = "
+                SELECT 
+                    SUM(CASE WHEN actual_return_date IS NULL AND CURRENT_DATE <= return_date THEN 1 ELSE 0 END) as issued,
+                    SUM(CASE WHEN actual_return_date IS NOT NULL THEN 1 ELSE 0 END) as returned,
+                    SUM(CASE WHEN actual_return_date IS NULL AND CURRENT_DATE > return_date THEN 1 ELSE 0 END) as overdue
+                FROM issued_books
+            ";
             $countResult = $conn->query($countSql);
-            $counts = [
-                'issued' => 0,
-                'returned' => 0,
-                'overdue' => 0
-            ];
+            $counts = ['issued' => 0, 'returned' => 0, 'overdue' => 0];
             
-            if ($countResult) {
-                while ($row = $countResult->fetch_assoc()) {
-                    $counts[$row['status']] = $row['count'];
-                }
+            if ($countResult && $row = $countResult->fetch_assoc()) {
+                $counts['issued'] = $row['issued'] ?: 0;
+                $counts['returned'] = $row['returned'] ?: 0;
+                $counts['overdue'] = $row['overdue'] ?: 0;
             }
             ?>
             <span class="badge badge-primary">Issued: <?php echo $counts['issued']; ?></span>
@@ -197,7 +216,7 @@ while ($row = $result->fetch_assoc()) {
     </div>
 </div>
 
-<div class="table-container" style="margin-top:30px";>
+<div class="table-container" style="margin-top:30px;">
     <table class="table table-striped">
         <thead>
             <tr>
@@ -230,16 +249,9 @@ while ($row = $result->fetch_assoc()) {
                         </td>
                         <td>
                             <?php 
-                            switch ($book['status']) {
+                            switch ($book['current_status']) {
                                 case 'issued':
-                                    // Check if overdue
-                                    $today = new DateTime();
-                                    $dueDate = new DateTime($book['return_date']);
-                                    if ($today > $dueDate) {
-                                        echo '<span class="badge badge-danger">Overdue</span>';
-                                    } else {
-                                        echo '<span class="badge badge-primary">Issued</span>';
-                                    }
+                                    echo '<span class="badge badge-primary">Issued</span>';
                                     break;
                                 case 'returned':
                                     echo '<span class="badge badge-success">Returned</span>';
@@ -248,39 +260,27 @@ while ($row = $result->fetch_assoc()) {
                                     echo '<span class="badge badge-danger">Overdue</span>';
                                     break;
                                 default:
-                                    echo htmlspecialchars($book['status']);
+                                    echo '<span class="badge badge-secondary">' . htmlspecialchars($book['current_status']) . '</span>';
                             }
                             ?>
                         </td>
                         <td>
-    <?php 
-    if ($book['fine_amount'] > 0) {
-        echo 'PKR ' . number_format($book['fine_amount'], 2);
-    } else {
-        // Calculate fine for overdue but not yet returned
-        if ($book['status'] == 'issued') {
-    $today = new DateTime();
-    $dueDate = new DateTime($book['return_date']);
-    if ($today > $dueDate) {
-        $diff = $today->diff($dueDate);
-        $daysOverdue = $diff->days;
-        // Fix: always positive overdue days
-        if ($diff->invert == 0) {
-            $daysOverdue = 0;
-        }
-        $suggestedFine = $daysOverdue * 100.00; // $1 per day overdue
-        echo '<span class="text-danger">PKR' . number_format($suggestedFine, 2) . ' (pending)</span>';
-    } else {
-        echo '-';
-    }
-} else {
-    echo '-';
-}
-    }
-    ?>
-</td>
+                            <?php 
+                            if ($book['fine_amount'] > 0) {
+                                echo 'PKR ' . number_format($book['fine_amount'], 2);
+                            } else {
+                                // Calculate potential fine for overdue but not yet returned
+                                if ($book['current_status'] == 'overdue' && !$book['actual_return_date']) {
+                                    $suggestedFine = $book['days_overdue'] * 100.00; // PKR 100 per day overdue
+                                    echo '<span class="text-danger">PKR ' . number_format($suggestedFine, 2) . ' (pending)</span>';
+                                } else {
+                                    echo '-';
+                                }
+                            }
+                            ?>
+                        </td>
                         <td>
-                            <?php if ($book['status'] != 'returned'): ?>
+                            <?php if ($book['current_status'] != 'returned'): ?>
                                 <button class="btn btn-sm btn-primary" data-modal-target="returnModal<?php echo $book['id']; ?>">
                                     <i class="fas fa-undo"></i> Process Return
                                 </button>
@@ -306,7 +306,7 @@ while ($row = $result->fetch_assoc()) {
                                             if ($today > $dueDate) {
                                                 $diff = $today->diff($dueDate);
                                                 $daysOverdue = $diff->days;
-                                                $suggestedFine = $daysOverdue * 100.00; // $1 per day overdue
+                                                $suggestedFine = $daysOverdue * 100.00; // PKR 100 per day overdue
                                             }
                                             
                                             // Check for reservations
@@ -334,7 +334,7 @@ while ($row = $result->fetch_assoc()) {
                                                 <?php if ($daysOverdue > 0): ?>
                                                     <div class="alert alert-warning">
                                                         This book is <strong><?php echo $daysOverdue; ?> days</strong> overdue.
-                                                        Suggested fine: PKR<?php echo number_format($suggestedFine, 2); ?>
+                                                        Suggested fine: PKR <?php echo number_format($suggestedFine, 2); ?>
                                                     </div>
                                                     
                                                     <div class="form-group">
