@@ -196,11 +196,11 @@ cleanExpiredReservations($conn);
                     </div>
                     <div class="book-actions">
                         <?php if ($book['available_quantity'] > 0): ?>
-                            <button class="btn btn-primary btn-sm" data-modal-target="requestModal<?php echo $book['id']; ?>">
+                            <button class="btn btn-primary btn-sm modal-trigger" data-modal="requestModal<?php echo $book['id']; ?>">
                                 <i class="fas fa-book"></i> Request Book
                             </button>
                         <?php elseif (!$userHasReservation): ?>
-                            <button class="btn btn-warning btn-sm" data-modal-target="reserveModal<?php echo $book['id']; ?>">
+                            <button class="btn btn-warning btn-sm modal-trigger" data-modal="reserveModal<?php echo $book['id']; ?>">
                                 <i class="fas fa-bookmark"></i> Reserve Book
                             </button>
                         <?php else: ?>
@@ -208,99 +208,6 @@ cleanExpiredReservations($conn);
                                 <i class="fas fa-bookmark"></i> Reserved
                             </button>
                         <?php endif; ?>
-                    </div>
-
-                    <!-- Request Modal -->
-                    <div class="modal-overlay" id="requestModal<?php echo $book['id']; ?>">
-                        <div class="modal">
-                            <div class="modal-header">
-                                <h3 class="modal-title">Request Book</h3>
-                                <button class="modal-close">&times;</button>
-                            </div>
-                            <div class="modal-body">
-                                <div class="book-request-info">
-                                    <h4><?php echo htmlspecialchars($book['title']); ?></h4>
-                                    <p class="text-muted">by <?php echo htmlspecialchars($book['author']); ?></p>
-                                    <div class="availability-status">
-                                        <span class="badge badge-success">
-                                            <i class="fas fa-check-circle"></i> Available Now
-                                        </span>
-                                    </div>
-                                </div>
-                                
-                                <form action="" method="POST">
-                                    <input type="hidden" name="book_id" value="<?php echo $book['id']; ?>">
-                                    
-                                    <div class="form-group">
-                                        <label for="notes">Additional Notes (Optional)</label>
-                                        <textarea id="notes" name="notes" class="form-control" rows="3" placeholder="Any special requirements or notes..."></textarea>
-                                    </div>
-                                    
-                                    <div class="form-group text-right">
-                                        <button type="button" class="btn btn-secondary modal-close">Cancel</button>
-                                        <button type="submit" name="request_book" class="btn btn-primary">
-                                            <i class="fas fa-paper-plane"></i> Submit Request
-                                        </button>
-                                    </div>
-                                </form>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Reserve Modal -->
-                    <div class="modal-overlay" id="reserveModal<?php echo $book['id']; ?>">
-                        <div class="modal">
-                            <div class="modal-header">
-                                <h3 class="modal-title">Reserve Book</h3>
-                                <button class="modal-close">&times;</button>
-                            </div>
-                            <div class="modal-body">
-                                <div class="book-reserve-info">
-                                    <h4><?php echo htmlspecialchars($book['title']); ?></h4>
-                                    <p class="text-muted">by <?php echo htmlspecialchars($book['author']); ?></p>
-                                    <div class="availability-status">
-                                        <span class="badge badge-warning">
-                                            <i class="fas fa-clock"></i> Currently Unavailable
-                                        </span>
-                                    </div>
-                                    
-                                    <?php if (count($reservationQueue) > 0): ?>
-                                        <div class="queue-info">
-                                            <p class="text-info">
-                                                <i class="fas fa-users"></i> 
-                                                <?php echo count($reservationQueue); ?> person(s) ahead of you in the queue
-                                            </p>
-                                        </div>
-                                    <?php endif; ?>
-                                    
-                                    <div class="reservation-details">
-                                        <h5>Reservation Details:</h5>
-                                        <ul>
-                                            <li>You will be notified when the book becomes available</li>
-                                            <li>You'll have 24 hours to collect the book once notified</li>
-                                            <li>Reservations expire after 7 days if not fulfilled</li>
-                                            <li>You can cancel your reservation anytime</li>
-                                        </ul>
-                                    </div>
-                                </div>
-                                
-                                <form action="" method="POST">
-                                    <input type="hidden" name="book_id" value="<?php echo $book['id']; ?>">
-                                    
-                                    <div class="form-group">
-                                        <label for="reserve_notes">Notes (Optional)</label>
-                                        <textarea id="reserve_notes" name="notes" class="form-control" rows="3" placeholder="Any special requirements or notes..."></textarea>
-                                    </div>
-                                    
-                                    <div class="form-group text-right">
-                                        <button type="button" class="btn btn-secondary modal-close">Cancel</button>
-                                        <button type="submit" name="reserve_book" class="btn btn-warning">
-                                            <i class="fas fa-bookmark"></i> Reserve Book
-                                        </button>
-                                    </div>
-                                </form>
-                            </div>
-                        </div>
                     </div>
                 </div>
             <?php endforeach; ?>
@@ -324,6 +231,108 @@ cleanExpiredReservations($conn);
         <?php endif; ?>
     </div>
 </div>
+
+<!-- Modal Overlay -->
+<div class="modal-overlay" id="modalOverlay">
+    <div class="modal" id="modalContent">
+        <div class="modal-header">
+            <h3 class="modal-title" id="modalTitle">Modal Title</h3>
+            <button class="modal-close" id="modalClose">&times;</button>
+        </div>
+        <div class="modal-body" id="modalBody">
+            <!-- Modal content will be inserted here -->
+        </div>
+    </div>
+</div>
+
+<!-- Hidden Modal Templates -->
+<?php foreach ($books as $book): ?>
+    <!-- Request Modal Template -->
+    <div class="modal-template" id="requestModal<?php echo $book['id']; ?>" style="display: none;">
+        <div class="modal-content">
+            <h3>Request Book</h3>
+            <div class="book-request-info">
+                <h4><?php echo htmlspecialchars($book['title']); ?></h4>
+                <p class="text-muted">by <?php echo htmlspecialchars($book['author']); ?></p>
+                <div class="availability-status">
+                    <span class="badge badge-success">
+                        <i class="fas fa-check-circle"></i> Available Now
+                    </span>
+                </div>
+            </div>
+            
+            <form action="" method="POST">
+                <input type="hidden" name="book_id" value="<?php echo $book['id']; ?>">
+                
+                <div class="form-group">
+                    <label for="notes_<?php echo $book['id']; ?>">Additional Notes (Optional)</label>
+                    <textarea id="notes_<?php echo $book['id']; ?>" name="notes" class="form-control" rows="3" placeholder="Any special requirements or notes..."></textarea>
+                </div>
+                
+                <div class="form-group text-right">
+                    <button type="button" class="btn btn-secondary modal-close-btn">Cancel</button>
+                    <button type="submit" name="request_book" class="btn btn-primary">
+                        <i class="fas fa-paper-plane"></i> Submit Request
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Reserve Modal Template -->
+    <div class="modal-template" id="reserveModal<?php echo $book['id']; ?>" style="display: none;">
+        <div class="modal-content">
+            <h3>Reserve Book</h3>
+            <div class="book-reserve-info">
+                <h4><?php echo htmlspecialchars($book['title']); ?></h4>
+                <p class="text-muted">by <?php echo htmlspecialchars($book['author']); ?></p>
+                <div class="availability-status">
+                    <span class="badge badge-warning">
+                        <i class="fas fa-clock"></i> Currently Unavailable
+                    </span>
+                </div>
+                
+                <?php 
+                $reservationQueue = getBookReservationQueue($conn, $book['id']);
+                if (count($reservationQueue) > 0): 
+                ?>
+                    <div class="queue-info">
+                        <p class="text-info">
+                            <i class="fas fa-users"></i> 
+                            <?php echo count($reservationQueue); ?> person(s) ahead of you in the queue
+                        </p>
+                    </div>
+                <?php endif; ?>
+                
+                <div class="reservation-details">
+                    <h5>Reservation Details:</h5>
+                    <ul>
+                        <li>You will be notified when the book becomes available</li>
+                        <li>You'll have 24 hours to collect the book once notified</li>
+                        <li>Reservations expire after 7 days if not fulfilled</li>
+                        <li>You can cancel your reservation anytime</li>
+                    </ul>
+                </div>
+            </div>
+            
+            <form action="" method="POST">
+                <input type="hidden" name="book_id" value="<?php echo $book['id']; ?>">
+                
+                <div class="form-group">
+                    <label for="reserve_notes_<?php echo $book['id']; ?>">Notes (Optional)</label>
+                    <textarea id="reserve_notes_<?php echo $book['id']; ?>" name="notes" class="form-control" rows="3" placeholder="Any special requirements or notes..."></textarea>
+                </div>
+                
+                <div class="form-group text-right">
+                    <button type="button" class="btn btn-secondary modal-close-btn">Cancel</button>
+                    <button type="submit" name="reserve_book" class="btn btn-warning">
+                        <i class="fas fa-bookmark"></i> Reserve Book
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+<?php endforeach; ?>
 
 <style>
 .search-section {
@@ -460,6 +469,125 @@ cleanExpiredReservations($conn);
     color: var(--text-color);
 }
 
+/* Modal Styles */
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(0, 0, 0, 0.5);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 1050;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+.modal-overlay.active {
+    display: flex;
+    opacity: 1;
+}
+
+.modal {
+    background-color: var(--white);
+    border-radius: var(--border-radius);
+    box-shadow: 0 5px 30px rgba(0, 0, 0, 0.2);
+    width: 100%;
+    max-width: 600px;
+    max-height: 90vh;
+    overflow-y: auto;
+    transform: translateY(20px);
+    transition: transform 0.3s ease;
+}
+
+.modal-overlay.active .modal {
+    transform: translateY(0);
+}
+
+.modal-header {
+    padding: 20px;
+    border-bottom: 1px solid var(--gray-300);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: var(--primary-color);
+    color: var(--white);
+    border-radius: var(--border-radius) var(--border-radius) 0 0;
+}
+
+.modal-title {
+    margin: 0;
+    font-size: 1.25em;
+    font-weight: 600;
+}
+
+.modal-close {
+    background: none;
+    border: none;
+    font-size: 1.5em;
+    cursor: pointer;
+    color: var(--white);
+    padding: 0;
+    line-height: 1;
+    opacity: 0.8;
+    transition: opacity 0.3s ease;
+}
+
+.modal-close:hover {
+    opacity: 1;
+}
+
+.modal-body {
+    padding: 20px;
+}
+
+.modal-template {
+    display: none;
+}
+
+.modal-content h3 {
+    margin: 0 0 20px 0;
+    color: var(--primary-color);
+    font-size: 1.3em;
+}
+
+.form-group {
+    margin-bottom: 20px;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 8px;
+    font-weight: 500;
+    color: var(--text-color);
+}
+
+.form-control {
+    width: 100%;
+    padding: 12px;
+    border: 2px solid var(--gray-300);
+    border-radius: var(--border-radius);
+    font-size: 1em;
+    transition: var(--transition);
+    box-sizing: border-box;
+}
+
+.form-control:focus {
+    border-color: var(--primary-color);
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(13, 71, 161, 0.1);
+}
+
+.text-right {
+    text-align: right;
+}
+
+.modal-close-btn {
+    margin-right: 10px;
+}
+
 @media (max-width: 768px) {
     .search-row {
         flex-direction: column;
@@ -480,7 +608,98 @@ cleanExpiredReservations($conn);
         flex: 1;
         max-width: 150px;
     }
+    
+    .modal {
+        margin: 20px;
+        max-width: calc(100% - 40px);
+    }
+    
+    .modal-header {
+        padding: 15px;
+    }
+    
+    .modal-body {
+        padding: 15px;
+    }
 }
 </style>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const modalOverlay = document.getElementById('modalOverlay');
+    const modalContent = document.getElementById('modalContent');
+    const modalTitle = document.getElementById('modalTitle');
+    const modalBody = document.getElementById('modalBody');
+    const modalClose = document.getElementById('modalClose');
+    
+    // Function to open modal
+    function openModal(modalId) {
+        const template = document.getElementById(modalId);
+        if (!template) return;
+        
+        const content = template.querySelector('.modal-content');
+        if (!content) return;
+        
+        // Set modal title
+        const title = content.querySelector('h3');
+        if (title) {
+            modalTitle.textContent = title.textContent;
+        }
+        
+        // Clone and insert content
+        const clonedContent = content.cloneNode(true);
+        modalBody.innerHTML = '';
+        modalBody.appendChild(clonedContent);
+        
+        // Show modal
+        modalOverlay.classList.add('active');
+        document.body.style.overflow = 'hidden';
+        
+        // Add event listeners to close buttons in the modal
+        const closeButtons = modalBody.querySelectorAll('.modal-close-btn');
+        closeButtons.forEach(btn => {
+            btn.addEventListener('click', closeModal);
+        });
+    }
+    
+    // Function to close modal
+    function closeModal() {
+        modalOverlay.classList.remove('active');
+        document.body.style.overflow = '';
+        
+        // Clear content after animation
+        setTimeout(() => {
+            modalBody.innerHTML = '';
+        }, 300);
+    }
+    
+    // Event listeners for modal triggers
+    const modalTriggers = document.querySelectorAll('.modal-trigger');
+    modalTriggers.forEach(trigger => {
+        trigger.addEventListener('click', function(e) {
+            e.preventDefault();
+            const modalId = this.getAttribute('data-modal');
+            openModal(modalId);
+        });
+    });
+    
+    // Close modal when clicking close button
+    modalClose.addEventListener('click', closeModal);
+    
+    // Close modal when clicking overlay
+    modalOverlay.addEventListener('click', function(e) {
+        if (e.target === this) {
+            closeModal();
+        }
+    });
+    
+    // Close modal with ESC key
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape' && modalOverlay.classList.contains('active')) {
+            closeModal();
+        }
+    });
+});
+</script>
 
 <?php include_once '../includes/footer.php'; ?>
