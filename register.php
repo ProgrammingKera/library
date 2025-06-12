@@ -453,7 +453,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                     <div class="form-col">
                         <div class="form-group">
                             <label for="phone"><i class="fas fa-phone"></i> Phone Number</label>
-                            <input type="tel" id="phone" name="phone">
+                            <input type="tel" id="phone" name="phone" placeholder="03123456789">
                         </div>
                     </div>
                 </div>

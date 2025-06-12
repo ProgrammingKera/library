@@ -269,18 +269,32 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             background: rgba(245, 245, 245, 0.9);
         }
 
-        .register-link, .forgot-password-link {
+        .login-links {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-top: 20px;
+        }
+
+        .login-link {
             display: block;
-            margin-top: 15px;
             color: #0d47a1;
             text-decoration: none;
             font-weight: 500;
             transition: all 0.3s ease;
+            padding: 8px;
+            border-radius: 6px;
         }
 
-        .register-link:hover, .forgot-password-link:hover {
+        .login-link:hover {
             color: #1565c0;
+            background: rgba(13, 71, 161, 0.05);
             transform: translateX(5px);
+        }
+
+        .login-link.primary {
+            background: rgba(13, 71, 161, 0.1);
+            border: 1px solid rgba(13, 71, 161, 0.2);
         }
 
         .alert {
@@ -410,13 +424,19 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                     <i class="fas fa-sign-in-alt"></i> Login
                 </button>
 
-                <a href="forgot_password.php" class="forgot-password-link">
-                    <i class="fas fa-key"></i> Forgot your password?
-                </a>
+                <div class="login-links">
+                    <a href="recover_account.php" class="login-link primary">
+                        <i class="fas fa-search"></i> Forgot your ID or Email? Find your account
+                    </a>
+                    
+                    <a href="forgot_password.php" class="login-link">
+                        <i class="fas fa-key"></i> Forgot your password?
+                    </a>
 
-                <a href="register.php" class="register-link">
-                    <i class="fas fa-user-plus"></i> Don't have an account? Register here
-                </a>
+                    <a href="register.php" class="login-link">
+                        <i class="fas fa-user-plus"></i> Don't have an account? Register here
+                    </a>
+                </div>
             </form>
             
             <div class="login-footer">
