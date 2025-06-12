@@ -36,9 +36,13 @@ function getTotalUsers($conn) {
     return $row['total'] ? $row['total'] : 0;
 }
 
-// Get total number of pending requests
+// Get total number of pending requests (book requests + reservation requests)
 function getPendingRequests($conn) {
-    $sql = "SELECT COUNT(*) as total FROM book_requests WHERE status = 'pending'";
+    $sql = "
+        SELECT 
+            (SELECT COUNT(*) FROM book_requests WHERE status = 'pending') +
+            (SELECT COUNT(*) FROM reservation_requests WHERE status = 'pending') as total
+    ";
     $result = $conn->query($sql);
     $row = $result->fetch_assoc();
     return $row['total'] ? $row['total'] : 0;
@@ -193,9 +197,151 @@ function getBookTitle($conn, $bookId) {
     return 'Unknown Book';
 }
 
-// Book Reservation Functions
+// NEW RESERVATION REQUEST FUNCTIONS
 
-// Create a book reservation
+// Create a reservation request (student submits request)
+function createReservationRequest($conn, $bookId, $userId, $notes = '') {
+    // Check if user already has a pending reservation request for this book
+    $stmt = $conn->prepare("
+        SELECT id FROM reservation_requests 
+        WHERE book_id = ? AND user_id = ? AND status = 'pending'
+    ");
+    $stmt->bind_param("ii", $bookId, $userId);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    
+    if ($result->num_rows > 0) {
+        return array('success' => false, 'message' => 'You already have a pending reservation request for this book.');
+    }
+    
+    // Check if user already has an active reservation for this book
+    $stmt = $conn->prepare("
+        SELECT id FROM book_reservations 
+        WHERE book_id = ? AND user_id = ? AND status = 'active'
+    ");
+    $stmt->bind_param("ii", $bookId, $userId);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    
+    if ($result->num_rows > 0) {
+        return array('success' => false, 'message' => 'You already have an active reservation for this book.');
+    }
+    
+    // Create reservation request
+    $stmt = $conn->prepare("
+        INSERT INTO reservation_requests (book_id, user_id, notes)
+        VALUES (?, ?, ?)
+    ");
+    $stmt->bind_param("iis", $bookId, $userId, $notes);
+    
+    if ($stmt->execute()) {
+        $bookTitle = getBookTitle($conn, $bookId);
+        $message = "Your reservation request for '{$bookTitle}' has been submitted and is pending approval.";
+        sendNotification($conn, $userId, $message);
+        
+        return array(
+            'success' => true, 
+            'message' => "Reservation request submitted successfully! You will be notified once it's reviewed."
+        );
+    } else {
+        return array('success' => false, 'message' => 'Error creating reservation request.');
+    }
+}
+
+// Approve reservation request (librarian approves and creates actual reservation)
+function approveReservationRequest($conn, $requestId) {
+    // Get request details
+    $stmt = $conn->prepare("
+        SELECT rr.*, b.title, u.name as user_name 
+        FROM reservation_requests rr
+        JOIN books b ON rr.book_id = b.id
+        JOIN users u ON rr.user_id = u.id
+        WHERE rr.id = ? AND rr.status = 'pending'
+    ");
+    $stmt->bind_param("i", $requestId);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    
+    if ($result->num_rows == 0) {
+        return array('success' => false, 'message' => 'Reservation request not found or already processed.');
+    }
+    
+    $request = $result->fetch_assoc();
+    
+    // Start transaction
+    $conn->begin_transaction();
+    
+    try {
+        // Update request status to approved
+        $stmt = $conn->prepare("UPDATE reservation_requests SET status = 'approved' WHERE id = ?");
+        $stmt->bind_param("i", $requestId);
+        $stmt->execute();
+        
+        // Create actual reservation
+        $reservationResult = createBookReservation($conn, $request['book_id'], $request['user_id'], $request['notes']);
+        
+        if (!$reservationResult['success']) {
+            throw new Exception($reservationResult['message']);
+        }
+        
+        // Send notification to user
+        $message = "Great news! Your reservation request for '{$request['title']}' has been approved. " . $reservationResult['message'];
+        sendNotification($conn, $request['user_id'], $message);
+        
+        $conn->commit();
+        
+        return array(
+            'success' => true,
+            'message' => "Reservation request approved successfully. {$request['user_name']} has been notified."
+        );
+        
+    } catch (Exception $e) {
+        $conn->rollback();
+        return array('success' => false, 'message' => 'Error approving reservation request: ' . $e->getMessage());
+    }
+}
+
+// Reject reservation request
+function rejectReservationRequest($conn, $requestId) {
+    // Get request details
+    $stmt = $conn->prepare("
+        SELECT rr.*, b.title, u.name as user_name 
+        FROM reservation_requests rr
+        JOIN books b ON rr.book_id = b.id
+        JOIN users u ON rr.user_id = u.id
+        WHERE rr.id = ? AND rr.status = 'pending'
+    ");
+    $stmt->bind_param("i", $requestId);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    
+    if ($result->num_rows == 0) {
+        return array('success' => false, 'message' => 'Reservation request not found or already processed.');
+    }
+    
+    $request = $result->fetch_assoc();
+    
+    // Update request status to rejected
+    $stmt = $conn->prepare("UPDATE reservation_requests SET status = 'rejected' WHERE id = ?");
+    $stmt->bind_param("i", $requestId);
+    
+    if ($stmt->execute()) {
+        // Send notification to user
+        $message = "Your reservation request for '{$request['title']}' has been rejected. Please contact the librarian for more information.";
+        sendNotification($conn, $request['user_id'], $message);
+        
+        return array(
+            'success' => true,
+            'message' => "Reservation request rejected. {$request['user_name']} has been notified."
+        );
+    } else {
+        return array('success' => false, 'message' => 'Error rejecting reservation request.');
+    }
+}
+
+// Book Reservation Functions (existing functions updated)
+
+// Create a book reservation (called after approval)
 function createBookReservation($conn, $bookId, $userId, $notes = '') {
     // Check if user already has an active reservation for this book
     $stmt = $conn->prepare("
@@ -233,11 +379,6 @@ function createBookReservation($conn, $bookId, $userId, $notes = '') {
     $stmt->bind_param("iiiss", $bookId, $userId, $priorityNumber, $expiresAt, $notes);
     
     if ($stmt->execute()) {
-        // Send notification
-        $bookTitle = getBookTitle($conn, $bookId);
-        $message = "You have successfully reserved '{$bookTitle}'. You are #$priorityNumber in the queue. You will be notified when the book becomes available.";
-        sendNotification($conn, $userId, $message);
-        
         return array(
             'success' => true, 
             'message' => "Book reserved successfully! You are #$priorityNumber in the queue.",

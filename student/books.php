@@ -37,13 +37,13 @@ if (isset($_POST['request_book'])) {
     }
 }
 
-// Process book reservation
-if (isset($_POST['reserve_book'])) {
+// Process reservation request (NEW)
+if (isset($_POST['request_reservation'])) {
     $bookId = (int)$_POST['book_id'];
     $notes = trim($_POST['notes']);
     $userId = $_SESSION['user_id'];
     
-    $result = createBookReservation($conn, $bookId, $userId, $notes);
+    $result = createReservationRequest($conn, $bookId, $userId, $notes);
     $message = $result['message'];
     $messageType = $result['success'] ? 'success' : 'danger';
 }
@@ -157,6 +157,12 @@ cleanExpiredReservations($conn);
                         break;
                     }
                 }
+                
+                // Check if user has pending reservation request
+                $stmt = $conn->prepare("SELECT id FROM reservation_requests WHERE book_id = ? AND user_id = ? AND status = 'pending'");
+                $stmt->bind_param("ii", $book['id'], $_SESSION['user_id']);
+                $stmt->execute();
+                $hasPendingReservationRequest = $stmt->get_result()->num_rows > 0;
                 ?>
                 <div class="book-card">
                     <div class="book-cover">
@@ -192,6 +198,13 @@ cleanExpiredReservations($conn);
                                     You're #<?php echo $userReservationPosition; ?> in queue
                                 </span>
                             </div>
+                        <?php elseif ($hasPendingReservationRequest): ?>
+                            <div class="user-reservation-status">
+                                <span class="badge badge-warning">
+                                    <i class="fas fa-clock"></i> 
+                                    &nbsp;Reservation request pending
+                                </span>
+                            </div>
                         <?php endif; ?>
                     </div>
                     <div class="book-actions">
@@ -199,9 +212,13 @@ cleanExpiredReservations($conn);
                             <button class="btn btn-primary btn-sm modal-trigger" data-modal="requestModal<?php echo $book['id']; ?>">
                                 <i class="fas fa-book"></i> Request Book
                             </button>
-                        <?php elseif (!$userHasReservation): ?>
+                        <?php elseif (!$userHasReservation && !$hasPendingReservationRequest): ?>
                             <button class="btn btn-warning btn-sm modal-trigger" data-modal="reserveModal<?php echo $book['id']; ?>">
-                                <i class="fas fa-bookmark"></i> Reserve Book
+                                <i class="fas fa-bookmark"></i> Request Reservation
+                            </button>
+                        <?php elseif ($hasPendingReservationRequest): ?>
+                            <button class="btn btn-secondary btn-sm" disabled>
+                                <i class="fas fa-clock"></i> Request Pending
                             </button>
                         <?php else: ?>
                             <button class="btn btn-secondary btn-sm" disabled>
@@ -279,16 +296,16 @@ cleanExpiredReservations($conn);
         </div>
     </div>
 
-    <!-- Reserve Modal Template -->
+    <!-- Reserve Modal Template (UPDATED) -->
     <div class="modal-template" id="reserveModal<?php echo $book['id']; ?>" style="display: none;">
         <div class="modal-content">
-            <h3>Reserve Book</h3>
+            <h3>Request Book Reservation</h3>
             <div class="book-reserve-info">
                 <h4><?php echo htmlspecialchars($book['title']); ?></h4>
                 <p class="text-muted">by <?php echo htmlspecialchars($book['author']); ?></p>
                 <div class="availability-status">
                     <span class="badge badge-warning">
-                        <i class="fas fa-clock"></i> Currently Unavailable
+                        <i class="fas fa-clock"></i>&nbsp;Currently Unavailable
                     </span>
                 </div>
                 
@@ -299,18 +316,19 @@ cleanExpiredReservations($conn);
                     <div class="queue-info">
                         <p class="text-info">
                             <i class="fas fa-users"></i> 
-                            <?php echo count($reservationQueue); ?> person(s) ahead of you in the queue
+                            <?php echo count($reservationQueue); ?> person(s) currently in the reservation queue
                         </p>
                     </div>
                 <?php endif; ?>
                 
                 <div class="reservation-details">
-                    <h5>Reservation Details:</h5>
+                    <h5>Reservation Request Process:</h5>
                     <ul>
-                        <li>You will be notified when the book becomes available</li>
-                        <li>You'll have 24 hours to collect the book once notified</li>
-                        <li>Reservations expire after 7 days if not fulfilled</li>
-                        <li>You can cancel your reservation anytime</li>
+                        <li><strong>Step 1:</strong> Submit your reservation request</li>
+                        <li><strong>Step 2:</strong> Librarian will review and approve/reject your request</li>
+                        <li><strong>Step 3:</strong> If approved, you'll be added to the reservation queue</li>
+                        <li><strong>Step 4:</strong> When the book becomes available, it will be automatically issued to you</li>
+                        <li>You'll receive notifications at each step</li>
                     </ul>
                 </div>
             </div>
@@ -325,8 +343,8 @@ cleanExpiredReservations($conn);
                 
                 <div class="form-group text-right">
                     <button type="button" class="btn btn-secondary modal-close-btn">Cancel</button>
-                    <button type="submit" name="reserve_book" class="btn btn-warning">
-                        <i class="fas fa-bookmark"></i> Reserve Book
+                    <button type="submit" name="request_reservation" class="btn btn-warning">
+                        <i class="fas fa-paper-plane"></i> Submit Reservation Request
                     </button>
                 </div>
             </form>

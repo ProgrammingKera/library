@@ -38,9 +38,36 @@ if (isset($_POST['cancel_request'])) {
     }
 }
 
+// Handle reservation request cancellation
+if (isset($_POST['cancel_reservation_request'])) {
+    $requestId = (int)$_POST['request_id'];
+    
+    // Verify the request belongs to the current user
+    $stmt = $conn->prepare("SELECT id FROM reservation_requests WHERE id = ? AND user_id = ? AND status = 'pending'");
+    $stmt->bind_param("ii", $requestId, $userId);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    
+    if ($result->num_rows > 0) {
+        $stmt = $conn->prepare("UPDATE reservation_requests SET status = 'cancelled' WHERE id = ?");
+        $stmt->bind_param("i", $requestId);
+        
+        if ($stmt->execute()) {
+            $message = "Reservation request cancelled successfully.";
+            $messageType = "success";
+        } else {
+            $message = "Error cancelling reservation request.";
+            $messageType = "danger";
+        }
+    } else {
+        $message = "Reservation request not found or cannot be cancelled.";
+        $messageType = "danger";
+    }
+}
+
 // Get all book requests for the user
 $sql = "
-    SELECT br.*, b.title, b.author, b.isbn, b.available_quantity
+    SELECT br.*, b.title, b.author, b.isbn, b.available_quantity, 'book' as request_type
     FROM book_requests br
     JOIN books b ON br.book_id = b.id
     WHERE br.user_id = ?
@@ -50,20 +77,48 @@ $stmt = $conn->prepare($sql);
 $stmt->bind_param("i", $userId);
 $stmt->execute();
 $result = $stmt->get_result();
-$requests = [];
+$bookRequests = [];
 while ($row = $result->fetch_assoc()) {
-    $requests[] = $row;
+    $bookRequests[] = $row;
 }
 
-// Separate requests by status
-$pendingRequests = array_filter($requests, function($req) { return $req['status'] == 'pending'; });
-$approvedRequests = array_filter($requests, function($req) { return $req['status'] == 'approved'; });
-$rejectedRequests = array_filter($requests, function($req) { return $req['status'] == 'rejected'; });
-$cancelledRequests = array_filter($requests, function($req) { return $req['status'] == 'cancelled'; });
+// Get all reservation requests for the user
+$sql = "
+    SELECT rr.*, b.title, b.author, b.isbn, b.available_quantity, 'reservation' as request_type
+    FROM reservation_requests rr
+    JOIN books b ON rr.book_id = b.id
+    WHERE rr.user_id = ?
+    ORDER BY rr.request_date DESC
+";
+$stmt = $conn->prepare($sql);
+$stmt->bind_param("i", $userId);
+$stmt->execute();
+$result = $stmt->get_result();
+$reservationRequests = [];
+while ($row = $result->fetch_assoc()) {
+    $reservationRequests[] = $row;
+}
+
+// Combine all requests
+$allRequests = array_merge($bookRequests, $reservationRequests);
+usort($allRequests, function($a, $b) {
+    return strtotime($b['request_date']) - strtotime($a['request_date']);
+});
+
+// Separate requests by status and type
+$pendingBookRequests = array_filter($bookRequests, function($req) { return $req['status'] == 'pending'; });
+$approvedBookRequests = array_filter($bookRequests, function($req) { return $req['status'] == 'approved'; });
+$rejectedBookRequests = array_filter($bookRequests, function($req) { return $req['status'] == 'rejected'; });
+$cancelledBookRequests = array_filter($bookRequests, function($req) { return $req['status'] == 'cancelled'; });
+
+$pendingReservationRequests = array_filter($reservationRequests, function($req) { return $req['status'] == 'pending'; });
+$approvedReservationRequests = array_filter($reservationRequests, function($req) { return $req['status'] == 'approved'; });
+$rejectedReservationRequests = array_filter($reservationRequests, function($req) { return $req['status'] == 'rejected'; });
+$cancelledReservationRequests = array_filter($reservationRequests, function($req) { return $req['status'] == 'cancelled'; });
 ?>
 
 <div class="container">
-    <h1 class="page-title">My Book Requests</h1>
+    <h1 class="page-title">My Requests</h1>
 
     <?php if (!empty($message)): ?>
         <div class="alert alert-<?php echo $messageType; ?>">
@@ -76,10 +131,30 @@ $cancelledRequests = array_filter($requests, function($req) { return $req['statu
     <div class="stats-container mb-4">
         <div class="stat-card">
             <div class="stat-icon">
+                <i class="fas fa-book"></i>
+            </div>
+            <div class="stat-info">
+                <div class="stat-number"><?php echo count($bookRequests); ?></div>
+                <div class="stat-label">Book Requests</div>
+            </div>
+        </div>
+
+        <div class="stat-card">
+            <div class="stat-icon">
+                <i class="fas fa-bookmark"></i>
+            </div>
+            <div class="stat-info">
+                <div class="stat-number"><?php echo count($reservationRequests); ?></div>
+                <div class="stat-label">Reservation Requests</div>
+            </div>
+        </div>
+
+        <div class="stat-card">
+            <div class="stat-icon">
                 <i class="fas fa-clock"></i>
             </div>
             <div class="stat-info">
-                <div class="stat-number"><?php echo count($pendingRequests); ?></div>
+                <div class="stat-number"><?php echo count($pendingBookRequests) + count($pendingReservationRequests); ?></div>
                 <div class="stat-label">Pending</div>
             </div>
         </div>
@@ -89,34 +164,14 @@ $cancelledRequests = array_filter($requests, function($req) { return $req['statu
                 <i class="fas fa-check-circle"></i>
             </div>
             <div class="stat-info">
-                <div class="stat-number"><?php echo count($approvedRequests); ?></div>
+                <div class="stat-number"><?php echo count($approvedBookRequests) + count($approvedReservationRequests); ?></div>
                 <div class="stat-label">Approved</div>
-            </div>
-        </div>
-
-        <div class="stat-card">
-            <div class="stat-icon">
-                <i class="fas fa-times-circle"></i>
-            </div>
-            <div class="stat-info">
-                <div class="stat-number"><?php echo count($rejectedRequests); ?></div>
-                <div class="stat-label">Rejected</div>
-            </div>
-        </div>
-
-        <div class="stat-card">
-            <div class="stat-icon">
-                <i class="fas fa-ban"></i>
-            </div>
-            <div class="stat-info">
-                <div class="stat-number"><?php echo count($cancelledRequests); ?></div>
-                <div class="stat-label">Cancelled</div>
             </div>
         </div>
     </div>
 
     <!-- Pending Requests -->
-    <?php if (count($pendingRequests) > 0): ?>
+    <?php if (count($pendingBookRequests) > 0 || count($pendingReservationRequests) > 0): ?>
     <div class="card mb-4">
         <div class="card-header">
             <h3><i class="fas fa-clock text-warning"></i> Pending Requests</h3>
@@ -126,6 +181,7 @@ $cancelledRequests = array_filter($requests, function($req) { return $req['statu
                 <table class="table table-striped">
                     <thead>
                         <tr>
+                            <th>Type</th>
                             <th>Book Details</th>
                             <th>Request Date</th>
                             <th>Notes</th>
@@ -134,8 +190,26 @@ $cancelledRequests = array_filter($requests, function($req) { return $req['statu
                         </tr>
                     </thead>
                     <tbody>
-                        <?php foreach ($pendingRequests as $request): ?>
+                        <?php 
+                        $pendingRequests = array_merge($pendingBookRequests, $pendingReservationRequests);
+                        usort($pendingRequests, function($a, $b) {
+                            return strtotime($b['request_date']) - strtotime($a['request_date']);
+                        });
+                        
+                        foreach ($pendingRequests as $request): 
+                        ?>
                             <tr>
+                                <td>
+                                    <?php if ($request['request_type'] == 'book'): ?>
+                                        <span class="badge badge-primary">
+                                            <i class="fas fa-book"></i> Book Request
+                                        </span>
+                                    <?php else: ?>
+                                        <span class="badge badge-warning">
+                                            <i class="fas fa-bookmark"></i> Reservation Request
+                                        </span>
+                                    <?php endif; ?>
+                                </td>
                                 <td>
                                     <strong><?php echo htmlspecialchars($request['title']); ?></strong><br>
                                     <small class="text-muted">by <?php echo htmlspecialchars($request['author']); ?></small><br>
@@ -159,10 +233,17 @@ $cancelledRequests = array_filter($requests, function($req) { return $req['statu
                                 <td>
                                     <form method="POST" style="display: inline;">
                                         <input type="hidden" name="request_id" value="<?php echo $request['id']; ?>">
-                                        <button type="submit" name="cancel_request" class="btn btn-danger btn-sm" 
-                                                onclick="return confirm('Are you sure you want to cancel this request?')">
-                                            <i class="fas fa-times"></i> Cancel
-                                        </button>
+                                        <?php if ($request['request_type'] == 'book'): ?>
+                                            <button type="submit" name="cancel_request" class="btn btn-danger btn-sm" 
+                                                    onclick="return confirm('Are you sure you want to cancel this book request?')">
+                                                <i class="fas fa-times"></i> Cancel
+                                            </button>
+                                        <?php else: ?>
+                                            <button type="submit" name="cancel_reservation_request" class="btn btn-danger btn-sm" 
+                                                    onclick="return confirm('Are you sure you want to cancel this reservation request?')">
+                                                <i class="fas fa-times"></i> Cancel
+                                            </button>
+                                        <?php endif; ?>
                                     </form>
                                 </td>
                             </tr>
@@ -175,7 +256,7 @@ $cancelledRequests = array_filter($requests, function($req) { return $req['statu
     <?php endif; ?>
 
     <!-- Approved Requests -->
-    <?php if (count($approvedRequests) > 0): ?>
+    <?php if (count($approvedBookRequests) > 0 || count($approvedReservationRequests) > 0): ?>
     <div class="card mb-4">
         <div class="card-header">
             <h3><i class="fas fa-check-circle text-success"></i> Approved Requests</h3>
@@ -185,6 +266,7 @@ $cancelledRequests = array_filter($requests, function($req) { return $req['statu
                 <table class="table table-striped">
                     <thead>
                         <tr>
+                            <th>Type</th>
                             <th>Book Details</th>
                             <th>Request Date</th>
                             <th>Notes</th>
@@ -192,8 +274,26 @@ $cancelledRequests = array_filter($requests, function($req) { return $req['statu
                         </tr>
                     </thead>
                     <tbody>
-                        <?php foreach ($approvedRequests as $request): ?>
+                        <?php 
+                        $approvedRequests = array_merge($approvedBookRequests, $approvedReservationRequests);
+                        usort($approvedRequests, function($a, $b) {
+                            return strtotime($b['request_date']) - strtotime($a['request_date']);
+                        });
+                        
+                        foreach ($approvedRequests as $request): 
+                        ?>
                             <tr>
+                                <td>
+                                    <?php if ($request['request_type'] == 'book'): ?>
+                                        <span class="badge badge-primary">
+                                            <i class="fas fa-book"></i>&nbsp;Book Request
+                                        </span>
+                                    <?php else: ?>
+                                        <span class="badge badge-warning">
+                                            <i class="fas fa-bookmark"></i>&nbsp;Reservation Request
+                                        </span>
+                                    <?php endif; ?>
+                                </td>
                                 <td>
                                     <strong><?php echo htmlspecialchars($request['title']); ?></strong><br>
                                     <small class="text-muted">by <?php echo htmlspecialchars($request['author']); ?></small><br>
@@ -209,7 +309,11 @@ $cancelledRequests = array_filter($requests, function($req) { return $req['statu
                                 </td>
                                 <td>
                                     <span class="badge badge-success">Approved</span><br>
-                                    <small class="text-muted">Visit library to collect</small>
+                                    <?php if ($request['request_type'] == 'book'): ?>
+                                        <small class="text-muted">Visit library to collect</small>
+                                    <?php else: ?>
+                                        <small class="text-muted">Added to reservation queue</small>
+                                    <?php endif; ?>
                                 </td>
                             </tr>
                         <?php endforeach; ?>
@@ -221,7 +325,7 @@ $cancelledRequests = array_filter($requests, function($req) { return $req['statu
     <?php endif; ?>
 
     <!-- Rejected/Cancelled Requests -->
-    <?php if (count($rejectedRequests) > 0 || count($cancelledRequests) > 0): ?>
+    <?php if (count($rejectedBookRequests) > 0 || count($rejectedReservationRequests) > 0 || count($cancelledBookRequests) > 0 || count($cancelledReservationRequests) > 0): ?>
     <div class="card">
         <div class="card-header">
             <h3><i class="fas fa-times-circle text-danger"></i> Rejected & Cancelled Requests</h3>
@@ -231,6 +335,7 @@ $cancelledRequests = array_filter($requests, function($req) { return $req['statu
                 <table class="table table-striped">
                     <thead>
                         <tr>
+                            <th>Type</th>
                             <th>Book Details</th>
                             <th>Request Date</th>
                             <th>Notes</th>
@@ -238,8 +343,31 @@ $cancelledRequests = array_filter($requests, function($req) { return $req['statu
                         </tr>
                     </thead>
                     <tbody>
-                        <?php foreach (array_merge($rejectedRequests, $cancelledRequests) as $request): ?>
+                        <?php 
+                        $rejectedCancelledRequests = array_merge(
+                            $rejectedBookRequests, 
+                            $rejectedReservationRequests, 
+                            $cancelledBookRequests, 
+                            $cancelledReservationRequests
+                        );
+                        usort($rejectedCancelledRequests, function($a, $b) {
+                            return strtotime($b['request_date']) - strtotime($a['request_date']);
+                        });
+                        
+                        foreach ($rejectedCancelledRequests as $request): 
+                        ?>
                             <tr>
+                                <td>
+                                    <?php if ($request['request_type'] == 'book'): ?>
+                                        <span class="badge badge-primary">
+                                            <i class="fas fa-book"></i> Book Request
+                                        </span>
+                                    <?php else: ?>
+                                        <span class="badge badge-warning">
+                                            <i class="fas fa-bookmark"></i> Reservation Request
+                                        </span>
+                                    <?php endif; ?>
+                                </td>
                                 <td>
                                     <strong><?php echo htmlspecialchars($request['title']); ?></strong><br>
                                     <small class="text-muted">by <?php echo htmlspecialchars($request['author']); ?></small><br>
@@ -269,12 +397,12 @@ $cancelledRequests = array_filter($requests, function($req) { return $req['statu
     </div>
     <?php endif; ?>
 
-    <?php if (count($requests) == 0): ?>
+    <?php if (count($allRequests) == 0): ?>
         <div class="card">
             <div class="card-body text-center">
-                <i class="fas fa-bookmark fa-3x text-muted mb-3"></i>
-                <h3>No Book Requests</h3>
-                <p class="text-muted">You haven't made any book requests yet.</p>
+                <i class="fas fa-clipboard-list fa-3x text-muted mb-3"></i>
+                <h3>No Requests</h3>
+                <p class="text-muted">You haven't made any book or reservation requests yet.</p>
                 <a href="books.php" class="btn btn-primary">
                     <i class="fas fa-search"></i> Browse Books
                 </a>

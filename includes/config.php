@@ -114,6 +114,21 @@ if ($conn->query($sql) !== TRUE) {
     die("Error creating book_requests table: " . $conn->error);
 }
 
+// Create Reservation Requests table (NEW)
+$sql = "CREATE TABLE IF NOT EXISTS reservation_requests (
+    id INT(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    book_id INT(11) NOT NULL,
+    user_id INT(11) NOT NULL,
+    request_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    status ENUM('pending', 'approved', 'rejected') NOT NULL DEFAULT 'pending',
+    notes TEXT,
+    FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+)";
+if ($conn->query($sql) !== TRUE) {
+    die("Error creating reservation_requests table: " . $conn->error);
+}
+
 // Create Book Reservations table
 $sql = "CREATE TABLE IF NOT EXISTS book_reservations (
     id INT(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,

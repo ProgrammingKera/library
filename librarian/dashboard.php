@@ -26,7 +26,7 @@ if ($autoProcessResult && $autoProcessResult->num_rows > 0) {
 $totalBooks = getTotalBooks($conn);
 $issuedBooks = getIssuedBooks($conn);
 $totalUsers = getTotalUsers($conn);
-$pendingRequests = getPendingRequests($conn);
+$pendingRequests = getPendingRequests($conn); // Now includes both book and reservation requests
 $totalFines = getTotalUnpaidFines($conn);
 
 // Get recent activities (limited to 5 with scroll)
@@ -111,6 +111,51 @@ if ($result) {
     }
 }
 
+// Get pending requests (both book and reservation requests)
+$pendingBookRequests = [];
+$pendingReservationRequests = [];
+
+// Book requests
+$sql = "
+    SELECT br.id, b.title, u.name as user_name, br.request_date, 'book' as request_type
+    FROM book_requests br
+    JOIN books b ON br.book_id = b.id
+    JOIN users u ON br.user_id = u.id
+    WHERE br.status = 'pending'
+    ORDER BY br.request_date DESC
+    LIMIT 5
+";
+$result = $conn->query($sql);
+if ($result) {
+    while ($row = $result->fetch_assoc()) {
+        $pendingBookRequests[] = $row;
+    }
+}
+
+// Reservation requests
+$sql = "
+    SELECT rr.id, b.title, u.name as user_name, rr.request_date, 'reservation' as request_type
+    FROM reservation_requests rr
+    JOIN books b ON rr.book_id = b.id
+    JOIN users u ON rr.user_id = u.id
+    WHERE rr.status = 'pending'
+    ORDER BY rr.request_date DESC
+    LIMIT 5
+";
+$result = $conn->query($sql);
+if ($result) {
+    while ($row = $result->fetch_assoc()) {
+        $pendingReservationRequests[] = $row;
+    }
+}
+
+// Combine pending requests
+$allPendingRequests = array_merge($pendingBookRequests, $pendingReservationRequests);
+usort($allPendingRequests, function($a, $b) {
+    return strtotime($b['request_date']) - strtotime($a['request_date']);
+});
+$allPendingRequests = array_slice($allPendingRequests, 0, 5);
+
 // Get active reservations summary
 $activeReservations = [];
 $sql = "
@@ -161,6 +206,16 @@ if ($result) {
         <div class="stat-info">
             <div class="stat-number"><?php echo $totalUsers; ?></div>
             <div class="stat-label">Total Users</div>
+        </div>
+    </div>
+    
+    <div class="stat-card">
+        <div class="stat-icon">
+            <i class="fas fa-clipboard-list"></i>
+        </div>
+        <div class="stat-info">
+            <div class="stat-number"><?php echo $pendingRequests; ?></div>
+            <div class="stat-label">Pending Requests</div>
         </div>
     </div>
     
@@ -239,37 +294,52 @@ if ($result) {
         </div>
     </div>
     
-    <!-- Active Reservations -->
+    <!-- Pending Requests (NEW SECTION) -->
     <div class="dashboard-col">
         <div class="card">
             <div class="card-header d-flex justify-between align-center">
-                <h3>Active Book Reservations</h3>
-                <span class="badge badge-info"><?php echo count($activeReservations); ?></span>
+                <h3>Pending Requests</h3>
+                <div class="header-badges">
+                    <span class="badge badge-warning"><?php echo count($allPendingRequests); ?></span>
+                    <a href="requests.php" class="btn btn-sm btn-primary">View All</a>
+                </div>
             </div>
             <div class="card-body">
-                <?php if (count($activeReservations) > 0): ?>
-                    <div class="alert alert-info mb-3">
-                        <i class="fas fa-magic"></i>
-                        <strong>Auto-Issue:</strong> Books are automatically issued to reserved users when returned.
-                    </div>
-                    
+                <?php if (count($allPendingRequests) > 0): ?>
                     <div class="table-container">
                         <table class="table">
                             <thead>
                                 <tr>
+                                    <th>Type</th>
                                     <th>Book</th>
                                     <th>User</th>
-                                    <th>Queue #</th>
                                     <th>Date</th>
+                                    <th>Action</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                <?php foreach ($activeReservations as $reservation): ?>
+                                <?php foreach ($allPendingRequests as $request): ?>
                                     <tr>
-                                        <td><?php echo htmlspecialchars($reservation['title']); ?></td>
-                                        <td><?php echo htmlspecialchars($reservation['user_name']); ?></td>
-                                        <td><span class="badge badge-primary">#<?php echo $reservation['priority_number']; ?></span></td>
-                                        <td><?php echo date('M d, Y', strtotime($reservation['reservation_date'])); ?></td>
+                                        <td>
+                                            <?php if ($request['request_type'] == 'book'): ?>
+                                                <span class="badge badge-primary">Book</span>
+                                            <?php else: ?>
+                                                <span class="badge badge-warning">Reserve</span>
+                                            <?php endif; ?>
+                                        </td>
+                                        <td><?php echo htmlspecialchars($request['title']); ?></td>
+                                        <td><?php echo htmlspecialchars($request['user_name']); ?></td>
+                                        <td><?php echo date('M d', strtotime($request['request_date'])); ?></td>
+                                        <td>
+                                            <a href="requests.php?id=<?php echo $request['id']; ?>&action=approve&type=<?php echo $request['request_type']; ?>" 
+                                               class="btn btn-xs btn-success">
+                                                <i class="fas fa-check"></i>
+                                            </a>
+                                            <a href="requests.php?id=<?php echo $request['id']; ?>&action=reject&type=<?php echo $request['request_type']; ?>" 
+                                               class="btn btn-xs btn-danger">
+                                                <i class="fas fa-times"></i>
+                                            </a>
+                                        </td>
                                     </tr>
                                 <?php endforeach; ?>
                             </tbody>
@@ -277,8 +347,8 @@ if ($result) {
                     </div>
                 <?php else: ?>
                     <div class="empty-state">
-                        <i class="fas fa-bookmark fa-3x"></i>
-                        <p>No active reservations</p>
+                        <i class="fas fa-clipboard-check fa-3x"></i>
+                        <p>No pending requests</p>
                     </div>
                 <?php endif; ?>
             </div>
@@ -287,6 +357,9 @@ if ($result) {
 </div>
 
 <div class="dashboard-row">
+    <!-- Active Reservations -->
+    
+    
     <!-- Books Due Today -->
     <div class="dashboard-col">
         <div class="card">
@@ -331,7 +404,9 @@ if ($result) {
             </div>
         </div>
     </div>
-    
+</div>
+
+<div class="dashboard-row">
     <!-- Overdue Books -->
     <div class="dashboard-col">
         <div class="card">
@@ -453,6 +528,12 @@ if ($result) {
     align-items: center;
 }
 
+.header-badges {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+
 .alert-info {
     background-color: #e3f2fd;
     border-color: #2196f3;
@@ -461,6 +542,30 @@ if ($result) {
 
 .fa-magic {
     color: #ff9800;
+}
+
+.btn-xs {
+    padding: 2px 6px;
+    font-size: 0.75em;
+    line-height: 1.2;
+}
+
+.stats-container {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 20px;
+    margin-bottom: 30px;
+}
+
+@media (max-width: 768px) {
+    .stats-container {
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    }
+    
+    .header-badges {
+        flex-direction: column;
+        gap: 5px;
+    }
 }
 </style>
 
