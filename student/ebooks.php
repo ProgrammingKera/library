@@ -91,53 +91,141 @@ while ($row = $result->fetch_assoc()) {
     </div>
 
     <?php if (count($ebooks) > 0): ?>
-        <div class="table-container">
-            <table class="table table-striped">
-                <thead>
-                    <tr>
-                        <th>Title</th>
-                        <th>Author</th>
-                        <th>Category</th>
-                        <th>Format</th>
-                        <th>Size</th>
-                        <th>Added On</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <?php foreach ($ebooks as $ebook): ?>
-                        <tr>
-                            <td><?php echo htmlspecialchars($ebook['title']); ?></td>
-                            <td><?php echo htmlspecialchars($ebook['author']); ?></td>
-                            <td><?php echo htmlspecialchars($ebook['category']); ?></td>
-                            <td>
+        <div class="ebooks-grid">
+            <?php foreach ($ebooks as $ebook): ?>
+                <div class="ebook-card">
+                    <div class="ebook-icon">
+                        <?php 
+                        $fileType = strtolower($ebook['file_type']);
+                        $iconClass = '';
+                        $iconColor = '';
+                        
+                        switch ($fileType) {
+                            case 'pdf':
+                                $iconClass = 'fas fa-file-pdf';
+                                $iconColor = '#dc3545';
+                                break;
+                            case 'epub':
+                                $iconClass = 'fas fa-book-open';
+                                $iconColor = '#6f42c1';
+                                break;
+                            case 'doc':
+                            case 'docx':
+                                $iconClass = 'fas fa-file-word';
+                                $iconColor = '#0d6efd';
+                                break;
+                            default:
+                                $iconClass = 'fas fa-file-alt';
+                                $iconColor = '#6c757d';
+                        }
+                        ?>
+                        <i class="<?php echo $iconClass; ?>" style="color: <?php echo $iconColor; ?>;"></i>
+                        <span class="file-type-badge"><?php echo strtoupper($fileType); ?></span>
+                    </div>
+                    
+                    <div class="ebook-info">
+                        <h3 class="ebook-title"><?php echo htmlspecialchars($ebook['title']); ?></h3>
+                        <p class="ebook-author">By <?php echo htmlspecialchars($ebook['author']); ?></p>
+                        
+                        <?php if (!empty($ebook['category'])): ?>
+                            <div class="ebook-category">
+                                <i class="fas fa-tag"></i>
+                                <span><?php echo htmlspecialchars($ebook['category']); ?></span>
+                            </div>
+                        <?php endif; ?>
+                        
+                        <div class="ebook-meta">
+                            <div class="meta-item">
+                                <i class="fas fa-hdd"></i>
+                                <span><?php echo htmlspecialchars($ebook['file_size']); ?></span>
+                            </div>
+                            <div class="meta-item">
+                                <i class="fas fa-calendar-alt"></i>
+                                <span><?php echo date('M d, Y', strtotime($ebook['created_at'])); ?></span>
+                            </div>
+                        </div>
+                        
+                        <?php if (!empty($ebook['description'])): ?>
+                            <div class="ebook-description">
                                 <?php 
-                                $fileType = strtoupper($ebook['file_type']);
-                                $iconClass = '';
-                                switch (strtolower($fileType)) {
-                                    case 'pdf':
-                                        $iconClass = 'fas fa-file-pdf';
-                                        break;
-                                    case 'epub':
-                                        $iconClass = 'fas fa-book';
-                                        break;
-                                    default:
-                                        $iconClass = 'fas fa-file';
-                                }
+                                $description = htmlspecialchars($ebook['description']);
+                                echo strlen($description) > 100 ? substr($description, 0, 100) . '...' : $description;
                                 ?>
-                                <i class="<?php echo $iconClass; ?>"></i> <?php echo $fileType; ?>
-                            </td>
-                            <td><?php echo htmlspecialchars($ebook['file_size']); ?></td>
-                            <td><?php echo date('M d, Y', strtotime($ebook['created_at'])); ?></td>
-                            <td>
-                                <a href="<?php echo htmlspecialchars($ebook['file_path']); ?>" class="btn btn-primary btn-sm" target="_blank">
-                                    <i class="fas fa-download"></i> Download
+                            </div>
+                        <?php endif; ?>
+                    </div>
+                    
+                    <div class="ebook-actions">
+                        <a href="<?php echo htmlspecialchars($ebook['file_path']); ?>" class="btn btn-primary" target="_blank">
+                            <i class="fas fa-download"></i> Download
+                        </a>
+                        <button class="btn btn-secondary btn-sm" data-modal-target="ebookModal<?php echo $ebook['id']; ?>">
+                            <i class="fas fa-info-circle"></i> Details
+                        </button>
+                    </div>
+
+                    <!-- E-book Details Modal -->
+                    <div class="modal-overlay" id="ebookModal<?php echo $ebook['id']; ?>">
+                        <div class="modal ebook-modal">
+                            <div class="modal-header">
+                                <h3 class="modal-title">E-book Details</h3>
+                                <button class="modal-close">&times;</button>
+                            </div>
+                            <div class="modal-body">
+                                <div class="ebook-detail-content">
+                                    <div class="detail-header">
+                                        <div class="detail-icon">
+                                            <i class="<?php echo $iconClass; ?>" style="color: <?php echo $iconColor; ?>;"></i>
+                                        </div>
+                                        <div class="detail-title">
+                                            <h4><?php echo htmlspecialchars($ebook['title']); ?></h4>
+                                            <p>By <?php echo htmlspecialchars($ebook['author']); ?></p>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="detail-info">
+                                        <div class="info-row">
+                                            <span class="info-label">Category:</span>
+                                            <span class="info-value"><?php echo htmlspecialchars($ebook['category'] ?: 'Not specified'); ?></span>
+                                        </div>
+                                        <div class="info-row">
+                                            <span class="info-label">File Type:</span>
+                                            <span class="info-value"><?php echo strtoupper($ebook['file_type']); ?></span>
+                                        </div>
+                                        <div class="info-row">
+                                            <span class="info-label">File Size:</span>
+                                            <span class="info-value"><?php echo htmlspecialchars($ebook['file_size']); ?></span>
+                                        </div>
+                                        <div class="info-row">
+                                            <span class="info-label">Added On:</span>
+                                            <span class="info-value"><?php echo date('F j, Y', strtotime($ebook['created_at'])); ?></span>
+                                        </div>
+                                        <?php if (!empty($ebook['uploader_name'])): ?>
+                                        <div class="info-row">
+                                            <span class="info-label">Uploaded By:</span>
+                                            <span class="info-value"><?php echo htmlspecialchars($ebook['uploader_name']); ?></span>
+                                        </div>
+                                        <?php endif; ?>
+                                    </div>
+                                    
+                                    <?php if (!empty($ebook['description'])): ?>
+                                    <div class="detail-description">
+                                        <h5>Description</h5>
+                                        <p><?php echo nl2br(htmlspecialchars($ebook['description'])); ?></p>
+                                    </div>
+                                    <?php endif; ?>
+                                </div>
+                            </div>
+                            <div class="modal-footer">
+                                <button type="button" class="btn btn-secondary modal-close">Close</button>
+                                <a href="<?php echo htmlspecialchars($ebook['file_path']); ?>" class="btn btn-primary" target="_blank">
+                                    <i class="fas fa-download"></i> Download E-book
                                 </a>
-                            </td>
-                        </tr>
-                    <?php endforeach; ?>
-                </tbody>
-            </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            <?php endforeach; ?>
         </div>
     <?php else: ?>
         <div class="no-results">
@@ -224,6 +312,241 @@ while ($row = $result->fetch_assoc()) {
     background-color: var(--gray-500);
 }
 
+.ebooks-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+    gap: 25px;
+}
+
+.ebook-card {
+    background: var(--white);
+    border-radius: 15px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+    overflow: hidden;
+    transition: var(--transition);
+    border: 1px solid var(--gray-200);
+}
+
+.ebook-card:hover {
+    transform: translateY(-8px);
+    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+}
+
+.ebook-icon {
+    background: linear-gradient(135deg, var(--gray-100), var(--gray-200));
+    padding: 30px;
+    text-align: center;
+    position: relative;
+    border-bottom: 1px solid var(--gray-200);
+}
+
+.ebook-icon i {
+    font-size: 4em;
+    margin-bottom: 15px;
+    display: block;
+}
+
+.file-type-badge {
+    position: absolute;
+    top: 15px;
+    right: 15px;
+    background: var(--primary-color);
+    color: var(--white);
+    padding: 5px 12px;
+    border-radius: 20px;
+    font-size: 0.8em;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+}
+
+.ebook-info {
+    padding: 25px;
+    flex: 1;
+}
+
+.ebook-title {
+    font-size: 1.3em;
+    font-weight: 700;
+    color: var(--primary-color);
+    margin: 0 0 8px 0;
+    line-height: 1.3;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.ebook-author {
+    color: var(--text-light);
+    font-size: 1em;
+    margin: 0 0 15px 0;
+    font-weight: 500;
+}
+
+.ebook-category {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 15px;
+    color: var(--primary-color);
+    font-size: 0.9em;
+    font-weight: 500;
+}
+
+.ebook-category i {
+    font-size: 0.8em;
+}
+
+.ebook-meta {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 15px;
+    font-size: 0.85em;
+    color: var(--text-light);
+}
+
+.meta-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.meta-item i {
+    font-size: 0.9em;
+    color: var(--primary-color);
+}
+
+.ebook-description {
+    color: var(--text-color);
+    font-size: 0.9em;
+    line-height: 1.5;
+    margin-bottom: 20px;
+    background: var(--gray-100);
+    padding: 12px;
+    border-radius: 8px;
+    border-left: 3px solid var(--primary-color);
+}
+
+.ebook-actions {
+    padding: 20px 25px;
+    background: var(--gray-100);
+    display: flex;
+    gap: 10px;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.ebook-actions .btn {
+    flex: 1;
+    text-align: center;
+    font-weight: 600;
+    border-radius: 8px;
+    transition: var(--transition);
+}
+
+.ebook-actions .btn-primary {
+    background: linear-gradient(135deg, var(--primary-color), var(--primary-light));
+    border: none;
+}
+
+.ebook-actions .btn-primary:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(13, 71, 161, 0.3);
+}
+
+.ebook-actions .btn-secondary {
+    background: var(--gray-400);
+    border: none;
+    color: var(--white);
+    flex: 0 0 auto;
+    padding: 8px 15px;
+}
+
+.ebook-actions .btn-secondary:hover {
+    background: var(--gray-500);
+    transform: translateY(-1px);
+}
+
+.ebook-modal .modal {
+    max-width: 600px;
+}
+
+.ebook-detail-content {
+    padding: 10px 0;
+}
+
+.detail-header {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    margin-bottom: 25px;
+    padding-bottom: 20px;
+    border-bottom: 2px solid var(--gray-200);
+}
+
+.detail-icon i {
+    font-size: 3em;
+}
+
+.detail-title h4 {
+    margin: 0 0 5px 0;
+    color: var(--primary-color);
+    font-size: 1.4em;
+}
+
+.detail-title p {
+    margin: 0;
+    color: var(--text-light);
+    font-size: 1.1em;
+}
+
+.detail-info {
+    margin-bottom: 25px;
+}
+
+.info-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--gray-200);
+}
+
+.info-row:last-child {
+    border-bottom: none;
+}
+
+.info-label {
+    font-weight: 600;
+    color: var(--text-light);
+    flex: 0 0 120px;
+}
+
+.info-value {
+    color: var(--text-color);
+    font-weight: 500;
+    text-align: right;
+}
+
+.detail-description {
+    background: var(--gray-100);
+    padding: 20px;
+    border-radius: 10px;
+    border-left: 4px solid var(--primary-color);
+}
+
+.detail-description h5 {
+    margin: 0 0 15px 0;
+    color: var(--primary-color);
+    font-size: 1.1em;
+}
+
+.detail-description p {
+    margin: 0;
+    line-height: 1.6;
+    color: var(--text-color);
+}
+
 .no-results {
     text-align: center;
     padding: 60px 20px;
@@ -256,6 +579,50 @@ while ($row = $result->fetch_assoc()) {
     .search-btn, .clear-btn {
         flex: 1;
         max-width: 150px;
+    }
+    
+    .ebooks-grid {
+        grid-template-columns: 1fr;
+        gap: 20px;
+    }
+    
+    .ebook-actions {
+        flex-direction: column;
+        gap: 10px;
+    }
+    
+    .ebook-actions .btn {
+        width: 100%;
+    }
+    
+    .detail-header {
+        flex-direction: column;
+        text-align: center;
+    }
+    
+    .info-row {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 5px;
+    }
+    
+    .info-value {
+        text-align: left;
+    }
+}
+
+@media (max-width: 480px) {
+    .ebook-card {
+        margin: 0 -10px;
+        border-radius: 10px;
+    }
+    
+    .ebook-info {
+        padding: 20px;
+    }
+    
+    .ebook-actions {
+        padding: 15px 20px;
     }
 }
 </style>

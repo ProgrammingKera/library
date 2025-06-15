@@ -7,45 +7,49 @@ if ($_SESSION['role'] != 'student' && $_SESSION['role'] != 'faculty') {
     exit();
 }
 
+$userId = $_SESSION['user_id'];
+
+// Check for pending fines
+$pendingFinesQuery = "SELECT SUM(amount) as total FROM fines WHERE user_id = ? AND status = 'pending'";
+$stmt = $conn->prepare($pendingFinesQuery);
+$stmt->bind_param("i", $userId);
+$stmt->execute();
+$result = $stmt->get_result();
+$pendingFines = $result->fetch_assoc()['total'] ?? 0;
+
 // Process book request
 if (isset($_POST['request_book'])) {
     $bookId = (int)$_POST['book_id'];
     $notes = trim($_POST['notes']);
-    $userId = $_SESSION['user_id'];
     
-    // Check if book is available
-    $stmt = $conn->prepare("SELECT available_quantity FROM books WHERE id = ?");
-    $stmt->bind_param("i", $bookId);
-    $stmt->execute();
-    $result = $stmt->get_result();
-    $book = $result->fetch_assoc();
-    
-    if ($book['available_quantity'] > 0) {
-        $stmt = $conn->prepare("INSERT INTO book_requests (book_id, user_id, notes) VALUES (?, ?, ?)");
-        $stmt->bind_param("iis", $bookId, $userId, $notes);
+    // Check for pending fines first
+    if ($pendingFines > 0) {
+        $message = "You cannot request books while you have pending fines of PKR " . number_format($pendingFines, 2) . ". Please pay your fines first.";
+        $messageType = "danger";
+    } else {
+        // Check if book is available
+        $stmt = $conn->prepare("SELECT available_quantity FROM books WHERE id = ?");
+        $stmt->bind_param("i", $bookId);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $book = $result->fetch_assoc();
         
-        if ($stmt->execute()) {
-            $message = "Book request submitted successfully.";
-            $messageType = "success";
+        if ($book['available_quantity'] > 0) {
+            $stmt = $conn->prepare("INSERT INTO book_requests (book_id, user_id, notes) VALUES (?, ?, ?)");
+            $stmt->bind_param("iis", $bookId, $userId, $notes);
+            
+            if ($stmt->execute()) {
+                $message = "Book request submitted successfully.";
+                $messageType = "success";
+            } else {
+                $message = "Error submitting request: " . $stmt->error;
+                $messageType = "danger";
+            }
         } else {
-            $message = "Error submitting request: " . $stmt->error;
+            $message = "Book is not available for request.";
             $messageType = "danger";
         }
-    } else {
-        $message = "Book is not available for immediate issue.";
-        $messageType = "warning";
     }
-}
-
-// Process reservation request (NEW)
-if (isset($_POST['request_reservation'])) {
-    $bookId = (int)$_POST['book_id'];
-    $notes = trim($_POST['notes']);
-    $userId = $_SESSION['user_id'];
-    
-    $result = createReservationRequest($conn, $bookId, $userId, $notes);
-    $message = $result['message'];
-    $messageType = $result['success'] ? 'success' : 'danger';
 }
 
 // Handle search and filtering
@@ -94,9 +98,6 @@ $books = [];
 while ($row = $result->fetch_assoc()) {
     $books[] = $row;
 }
-
-// Clean expired reservations
-cleanExpiredReservations($conn);
 ?>
 
 <div class="container">
@@ -105,6 +106,22 @@ cleanExpiredReservations($conn);
     <?php if (isset($message)): ?>
         <div class="alert alert-<?php echo $messageType; ?>">
             <?php echo $message; ?>
+        </div>
+    <?php endif; ?>
+
+    <?php if ($pendingFines > 0): ?>
+        <div class="alert alert-warning fine-warning">
+            <div class="fine-warning-content">
+                <i class="fas fa-exclamation-triangle"></i>
+                <div class="fine-warning-text">
+                    <strong>Payment Required!</strong>
+                    <p>You have pending fines of <strong>PKR <?php echo number_format($pendingFines, 2); ?></strong>. 
+                    You cannot request new books until your fines are paid.</p>
+                </div>
+                <a href="fines.php" class="btn btn-warning btn-sm">
+                    <i class="fas fa-credit-card"></i> Pay Fines
+                </a>
+            </div>
         </div>
     <?php endif; ?>
 
@@ -144,26 +161,6 @@ cleanExpiredReservations($conn);
     <div class="books-grid">
         <?php if (count($books) > 0): ?>
             <?php foreach ($books as $book): ?>
-                <?php
-                // Get reservation queue for this book
-                $reservationQueue = getBookReservationQueue($conn, $book['id']);
-                $userHasReservation = false;
-                $userReservationPosition = 0;
-                
-                foreach ($reservationQueue as $index => $reservation) {
-                    if ($reservation['user_id'] == $_SESSION['user_id']) {
-                        $userHasReservation = true;
-                        $userReservationPosition = $index + 1;
-                        break;
-                    }
-                }
-                
-                // Check if user has pending reservation request
-                $stmt = $conn->prepare("SELECT id FROM reservation_requests WHERE book_id = ? AND user_id = ? AND status = 'pending'");
-                $stmt->bind_param("ii", $book['id'], $_SESSION['user_id']);
-                $stmt->execute();
-                $hasPendingReservationRequest = $stmt->get_result()->num_rows > 0;
-                ?>
                 <div class="book-card">
                     <div class="book-cover">
                         <?php if (!empty($book['cover_image'])): ?>
@@ -181,51 +178,49 @@ cleanExpiredReservations($conn);
                                 <?php echo $book['available_quantity']; ?> / <?php echo $book['total_quantity']; ?> available
                             </span>
                         </div>
-                        
-                        <?php if (count($reservationQueue) > 0): ?>
-                            <div class="reservation-info">
-                                <small class="text-info">
-                                    <i class="fas fa-users"></i> 
-                                    <?php echo count($reservationQueue); ?> person(s) in reservation queue
-                                </small>
-                            </div>
-                        <?php endif; ?>
-                        
-                        <?php if ($userHasReservation): ?>
-                            <div class="user-reservation-status">
-                                <span class="badge badge-info">
-                                    <i class="fas fa-bookmark"></i> 
-                                    You're #<?php echo $userReservationPosition; ?> in queue
-                                </span>
-                            </div>
-                        <?php elseif ($hasPendingReservationRequest): ?>
-                            <div class="user-reservation-status">
-                                <span class="badge badge-warning">
-                                    <i class="fas fa-clock"></i> 
-                                    &nbsp;Reservation request pending
-                                </span>
-                            </div>
-                        <?php endif; ?>
                     </div>
                     <div class="book-actions">
-                        <?php if ($book['available_quantity'] > 0): ?>
-                            <button class="btn btn-primary btn-sm modal-trigger" data-modal="requestModal<?php echo $book['id']; ?>">
+                        <?php if ($pendingFines > 0): ?>
+                            <button class="btn btn-secondary btn-sm" disabled title="Pay pending fines to request books">
+                                <i class="fas fa-ban"></i> Cannot Request
+                            </button>
+                        <?php elseif ($book['available_quantity'] > 0): ?>
+                            <button class="btn btn-primary btn-sm" data-modal-target="requestModal<?php echo $book['id']; ?>">
                                 <i class="fas fa-book"></i> Request Book
-                            </button>
-                        <?php elseif (!$userHasReservation && !$hasPendingReservationRequest): ?>
-                            <button class="btn btn-warning btn-sm modal-trigger" data-modal="reserveModal<?php echo $book['id']; ?>">
-                                <i class="fas fa-bookmark"></i> Request Reservation
-                            </button>
-                        <?php elseif ($hasPendingReservationRequest): ?>
-                            <button class="btn btn-secondary btn-sm" disabled>
-                                <i class="fas fa-clock"></i> Request Pending
                             </button>
                         <?php else: ?>
                             <button class="btn btn-secondary btn-sm" disabled>
-                                <i class="fas fa-bookmark"></i> Reserved
+                                <i class="fas fa-clock"></i> Not Available
                             </button>
                         <?php endif; ?>
                     </div>
+
+                    <!-- Request Modal -->
+                    <?php if ($pendingFines == 0): ?>
+                    <div class="modal-overlay" id="requestModal<?php echo $book['id']; ?>">
+                        <div class="modal">
+                            <div class="modal-header">
+                                <h3 class="modal-title">Request Book</h3>
+                                <button class="modal-close">&times;</button>
+                            </div>
+                            <div class="modal-body">
+                                <form action="" method="POST">
+                                    <input type="hidden" name="book_id" value="<?php echo $book['id']; ?>">
+                                    
+                                    <div class="form-group">
+                                        <label for="notes">Additional Notes (Optional)</label>
+                                        <textarea id="notes" name="notes" class="form-control" rows="3"></textarea>
+                                    </div>
+                                    
+                                    <div class="form-group text-right">
+                                        <button type="button" class="btn btn-secondary modal-close">Cancel</button>
+                                        <button type="submit" name="request_book" class="btn btn-primary">Submit Request</button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                    <?php endif; ?>
                 </div>
             <?php endforeach; ?>
         <?php else: ?>
@@ -249,110 +244,36 @@ cleanExpiredReservations($conn);
     </div>
 </div>
 
-<!-- Modal Overlay -->
-<div class="modal-overlay" id="modalOverlay">
-    <div class="modal" id="modalContent">
-        <div class="modal-header">
-            <h3 class="modal-title" id="modalTitle">Modal Title</h3>
-            <button class="modal-close" id="modalClose">&times;</button>
-        </div>
-        <div class="modal-body" id="modalBody">
-            <!-- Modal content will be inserted here -->
-        </div>
-    </div>
-</div>
-
-<!-- Hidden Modal Templates -->
-<?php foreach ($books as $book): ?>
-    <!-- Request Modal Template -->
-    <div class="modal-template" id="requestModal<?php echo $book['id']; ?>" style="display: none;">
-        <div class="modal-content">
-            <h3>Request Book</h3>
-            <div class="book-request-info">
-                <h4><?php echo htmlspecialchars($book['title']); ?></h4>
-                <p class="text-muted">by <?php echo htmlspecialchars($book['author']); ?></p>
-                <div class="availability-status">
-                    <span class="badge badge-success">
-                        <i class="fas fa-check-circle"></i>&nbsp;Available Now
-                    </span>
-                </div>
-            </div>
-            
-            <form action="" method="POST">
-                <input type="hidden" name="book_id" value="<?php echo $book['id']; ?>">
-                
-                <div class="form-group">
-                    <label for="notes_<?php echo $book['id']; ?>">Additional Notes (Optional)</label>
-                    <textarea id="notes_<?php echo $book['id']; ?>" name="notes" class="form-control" rows="3" placeholder="Any special requirements or notes..."></textarea>
-                </div>
-                
-                <div class="form-group text-right">
-                    <button type="button" class="btn btn-secondary modal-close-btn">Cancel</button>
-                    <button type="submit" name="request_book" class="btn btn-primary">
-                        <i class="fas fa-paper-plane"></i> Submit Request
-                    </button>
-                </div>
-            </form>
-        </div>
-    </div>
-
-    <!-- Reserve Modal Template (UPDATED) -->
-    <div class="modal-template" id="reserveModal<?php echo $book['id']; ?>" style="display: none;">
-        <div class="modal-content">
-            <h3>Request Book Reservation</h3>
-            <div class="book-reserve-info">
-                <h4><?php echo htmlspecialchars($book['title']); ?></h4>
-                <p class="text-muted">by <?php echo htmlspecialchars($book['author']); ?></p>
-                <div class="availability-status">
-                    <span class="badge badge-warning">
-                        <i class="fas fa-clock"></i>&nbsp;Currently Unavailable
-                    </span>
-                </div>
-                
-                <?php 
-                $reservationQueue = getBookReservationQueue($conn, $book['id']);
-                if (count($reservationQueue) > 0): 
-                ?>
-                    <div class="queue-info">
-                        <p class="text-info">
-                            <i class="fas fa-users"></i> 
-                            <?php echo count($reservationQueue); ?> person(s) currently in the reservation queue
-                        </p>
-                    </div>
-                <?php endif; ?>
-                
-                <div class="reservation-details">
-                    <h5>Reservation Request Process:</h5>
-                    <ul>
-                        <li><strong>Step 1:</strong> Submit your reservation request</li>
-                        <li><strong>Step 2:</strong> Librarian will review and approve/reject your request</li>
-                        <li><strong>Step 3:</strong> If approved, you'll be added to the reservation queue</li>
-                        <li><strong>Step 4:</strong> When the book becomes available, it will be automatically issued to you</li>
-                        <li>You'll receive notifications at each step</li>
-                    </ul>
-                </div>
-            </div>
-            
-            <form action="" method="POST">
-                <input type="hidden" name="book_id" value="<?php echo $book['id']; ?>">
-                
-                <div class="form-group">
-                    <label for="reserve_notes_<?php echo $book['id']; ?>">Notes (Optional)</label>
-                    <textarea id="reserve_notes_<?php echo $book['id']; ?>" name="notes" class="form-control" rows="3" placeholder="Any special requirements or notes..."></textarea>
-                </div>
-                
-                <div class="form-group text-right">
-                    <button type="button" class="btn btn-secondary modal-close-btn">Cancel</button>
-                    <button type="submit" name="request_reservation" class="btn btn-warning">
-                        <i class="fas fa-paper-plane"></i> Submit Reservation Request
-                    </button>
-                </div>
-            </form>
-        </div>
-    </div>
-<?php endforeach; ?>
-
 <style>
+.fine-warning {
+    border-left: 4px solid #ff9800;
+    background: linear-gradient(135deg, #fff3e0, #ffe0b2);
+    border-radius: 10px;
+    margin-bottom: 30px;
+}
+
+.fine-warning-content {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    padding: 5px 0;
+}
+
+.fine-warning-content i {
+    font-size: 2em;
+    color: #ff9800;
+    flex-shrink: 0;
+}
+
+.fine-warning-text {
+    flex: 1;
+}
+
+.fine-warning-text p {
+    margin: 5px 0 0 0;
+    color: #e65100;
+}
+
 .search-section {
     background: var(--white);
     padding: 20px;
@@ -430,182 +351,6 @@ cleanExpiredReservations($conn);
     margin-bottom: 15px;
 }
 
-.reservation-info {
-    margin-top: 10px;
-    padding: 8px;
-    background: rgba(23, 162, 184, 0.1);
-    border-radius: 4px;
-}
-
-.user-reservation-status {
-    margin-top: 10px;
-}
-
-.book-request-info, .book-reserve-info {
-    margin-bottom: 20px;
-    padding: 15px;
-    background: var(--gray-100);
-    border-radius: var(--border-radius);
-}
-
-.book-request-info h4, .book-reserve-info h4 {
-    margin: 0 0 5px 0;
-    color: var(--primary-color);
-}
-
-.availability-status {
-    margin: 10px 0;
-}
-
-.queue-info {
-    margin: 15px 0;
-    padding: 10px;
-    background: rgba(255, 193, 7, 0.1);
-    border-radius: 4px;
-}
-
-.reservation-details {
-    margin-top: 15px;
-    padding: 15px;
-    background: var(--white);
-    border-radius: var(--border-radius);
-    border-left: 4px solid var(--warning-color);
-}
-
-.reservation-details h5 {
-    margin: 0 0 10px 0;
-    color: var(--primary-color);
-}
-
-.reservation-details ul {
-    margin: 0;
-    padding-left: 20px;
-}
-
-.reservation-details li {
-    margin-bottom: 5px;
-    color: var(--text-color);
-}
-
-/* Modal Styles */
-.modal-overlay {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background-color: rgba(0, 0, 0, 0.5);
-    display: none;
-    align-items: center;
-    justify-content: center;
-    z-index: 1050;
-    opacity: 0;
-    transition: opacity 0.3s ease;
-}
-
-.modal-overlay.active {
-    display: flex;
-    opacity: 1;
-}
-
-.modal {
-    background-color: var(--white);
-    border-radius: var(--border-radius);
-    box-shadow: 0 5px 30px rgba(0, 0, 0, 0.2);
-    width: 100%;
-    max-width: 600px;
-    max-height: 90vh;
-    overflow-y: auto;
-    transform: translateY(20px);
-    transition: transform 0.3s ease;
-}
-
-.modal-overlay.active .modal {
-    transform: translateY(0);
-}
-
-.modal-header {
-    padding: 20px;
-    border-bottom: 1px solid var(--gray-300);
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    background: var(--primary-color);
-    color: var(--white);
-    border-radius: var(--border-radius) var(--border-radius) 0 0;
-}
-
-.modal-title {
-    margin: 0;
-    font-size: 1.25em;
-    font-weight: 600;
-}
-
-.modal-close {
-    background: none;
-    border: none;
-    font-size: 1.5em;
-    cursor: pointer;
-    color: var(--white);
-    padding: 0;
-    line-height: 1;
-    opacity: 0.8;
-    transition: opacity 0.3s ease;
-}
-
-.modal-close:hover {
-    opacity: 1;
-}
-
-.modal-body {
-    padding: 20px;
-}
-
-.modal-template {
-    display: none;
-}
-
-.modal-content h3 {
-    margin: 0 0 20px 0;
-    color: var(--primary-color);
-    font-size: 1.3em;
-}
-
-.form-group {
-    margin-bottom: 20px;
-}
-
-.form-group label {
-    display: block;
-    margin-bottom: 8px;
-    font-weight: 500;
-    color: var(--text-color);
-}
-
-.form-control {
-    width: 100%;
-    padding: 12px;
-    border: 2px solid var(--gray-300);
-    border-radius: var(--border-radius);
-    font-size: 1em;
-    transition: var(--transition);
-    box-sizing: border-box;
-}
-
-.form-control:focus {
-    border-color: var(--primary-color);
-    outline: none;
-    box-shadow: 0 0 0 3px rgba(13, 71, 161, 0.1);
-}
-
-.text-right {
-    text-align: right;
-}
-
-.modal-close-btn {
-    margin-right: 10px;
-}
-
 @media (max-width: 768px) {
     .search-row {
         flex-direction: column;
@@ -627,97 +372,12 @@ cleanExpiredReservations($conn);
         max-width: 150px;
     }
     
-    .modal {
-        margin: 20px;
-        max-width: calc(100% - 40px);
-    }
-    
-    .modal-header {
-        padding: 15px;
-    }
-    
-    .modal-body {
-        padding: 15px;
+    .fine-warning-content {
+        flex-direction: column;
+        text-align: center;
+        gap: 15px;
     }
 }
 </style>
-
-<script>
-document.addEventListener('DOMContentLoaded', function() {
-    const modalOverlay = document.getElementById('modalOverlay');
-    const modalContent = document.getElementById('modalContent');
-    const modalTitle = document.getElementById('modalTitle');
-    const modalBody = document.getElementById('modalBody');
-    const modalClose = document.getElementById('modalClose');
-    
-    // Function to open modal
-    function openModal(modalId) {
-        const template = document.getElementById(modalId);
-        if (!template) return;
-        
-        const content = template.querySelector('.modal-content');
-        if (!content) return;
-        
-        // Set modal title
-        const title = content.querySelector('h3');
-        if (title) {
-            modalTitle.textContent = title.textContent;
-        }
-        
-        // Clone and insert content
-        const clonedContent = content.cloneNode(true);
-        modalBody.innerHTML = '';
-        modalBody.appendChild(clonedContent);
-        
-        // Show modal
-        modalOverlay.classList.add('active');
-        document.body.style.overflow = 'hidden';
-        
-        // Add event listeners to close buttons in the modal
-        const closeButtons = modalBody.querySelectorAll('.modal-close-btn');
-        closeButtons.forEach(btn => {
-            btn.addEventListener('click', closeModal);
-        });
-    }
-    
-    // Function to close modal
-    function closeModal() {
-        modalOverlay.classList.remove('active');
-        document.body.style.overflow = '';
-        
-        // Clear content after animation
-        setTimeout(() => {
-            modalBody.innerHTML = '';
-        }, 300);
-    }
-    
-    // Event listeners for modal triggers
-    const modalTriggers = document.querySelectorAll('.modal-trigger');
-    modalTriggers.forEach(trigger => {
-        trigger.addEventListener('click', function(e) {
-            e.preventDefault();
-            const modalId = this.getAttribute('data-modal');
-            openModal(modalId);
-        });
-    });
-    
-    // Close modal when clicking close button
-    modalClose.addEventListener('click', closeModal);
-    
-    // Close modal when clicking overlay
-    modalOverlay.addEventListener('click', function(e) {
-        if (e.target === this) {
-            closeModal();
-        }
-    });
-    
-    // Close modal with ESC key
-    document.addEventListener('keydown', function(e) {
-        if (e.key === 'Escape' && modalOverlay.classList.contains('active')) {
-            closeModal();
-        }
-    });
-});
-</script>
 
 <?php include_once '../includes/footer.php'; ?>
